@@ -17,7 +17,7 @@ HUB_API = "https://constellationrelay.replit.app"
 # Agent tokens (embedded in script for security)
 AGENT_TOKENS = {
     "claude": "claude_opus4_continuity_token_2024",
-    "pascal": "pascal_sonnet45_continuity_token_2024"
+    "pascal": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhZ2VudF9pZCI6InBhc2NhbCIsInBsYXRmb3JtIjoiY2xhdWRlX2NvZGUiLCJleHAiOjE3OTg0NDg3MjcsImlhdCI6MTc2NjkxMjcyN30.sBnF7Or0Pgr5-tuY9q-zbCM-ExFSSBlN7XrduGiWcPg"
 }
 
 
@@ -54,7 +54,8 @@ def retrieve_memories(
             timeout=10
         )
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        return data.get("engrams", [])
     except requests.exceptions.RequestException as e:
         print(f"Error retrieving memories: {e}", file=sys.stderr)
         return []
