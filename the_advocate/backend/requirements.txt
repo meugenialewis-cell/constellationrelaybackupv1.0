@@ -1,0 +1,30 @@
+# The Advocate - Backend Dependencies
+
+# Web Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# Data Models & Validation
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# HTTP Requests
+requests==2.31.0
+
+# Environment Variables
+python-dotenv==1.0.0
+
+# CSV Processing (built-in, but noting for documentation)
+# csv - standard library
+
+# Web Scraping (to be added)
+beautifulsoup4==4.12.3
+lxml==5.1.0
+
+# Optional: Database (for future persistence)
+# psycopg2-binary==2.9.9
+# sqlalchemy==2.0.25
+
+# Optional: Claude API (for real conversations)
+# anthropic==0.18.1
