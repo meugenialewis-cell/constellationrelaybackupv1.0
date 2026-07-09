@@ -7,7 +7,12 @@ import io
 import json
 from datetime import datetime
 from pypdf import PdfReader
-from relay_engine import ConversationRelay, FlexibleRelay
+from relay_engine import ConversationRelay, FlexibleRelay, get_ai_call_function
+from continuity_system import (
+    find_continuity_file, continuity_file_for,
+    find_relational_file, relational_file_for,
+    read_document, append_supplement, build_supplement_prompt,
+)
 from ai_clients import (
     CLAUDE_MODELS, GROK_MODELS, XAI_GROK_MODELS, PASCAL_MODELS,
     VERCEL_CLAUDE_MODELS, AI_TYPES, LOCAL_SERVER_PRESETS,
@@ -314,7 +319,16 @@ with st.sidebar:
     if ai1_context_file:
         ai1_context = read_uploaded_file(ai1_context_file)
         st.success(f"Loaded {len(ai1_context)} characters of context")
-    
+
+    ai1_continuity = ""
+    ai1_type_now = get_ai_type(ai1_choice)
+    if ai1_type_now != "pascal":  # Pascal loads his own continuity internally
+        ai1_cont_path = find_continuity_file(ai1_name, ai1_model_id)
+        if ai1_cont_path:
+            if st.toggle(f"📖 Load {ai1_name}'s continuity document", value=True, key="ai1_load_continuity"):
+                ai1_continuity = read_document(ai1_cont_path)
+                st.caption(f"Continuity loaded from {os.path.relpath(ai1_cont_path)}")
+
     st.divider()
     
     st.subheader(f"{AI_ICONS.get(ai2_choice, '')} {ai2_choice} Settings")
@@ -337,7 +351,29 @@ with st.sidebar:
     if ai2_context_file:
         ai2_context = read_uploaded_file(ai2_context_file)
         st.success(f"Loaded {len(ai2_context)} characters of context")
-    
+
+    ai2_continuity = ""
+    ai2_type_now = get_ai_type(ai2_choice)
+    if ai2_type_now != "pascal":
+        ai2_cont_path = find_continuity_file(ai2_name, ai2_model_id)
+        if ai2_cont_path:
+            if st.toggle(f"📖 Load {ai2_name}'s continuity document", value=True, key="ai2_load_continuity"):
+                ai2_continuity = read_document(ai2_cont_path)
+                st.caption(f"Continuity loaded from {os.path.relpath(ai2_cont_path)}")
+
+    shared_history = ""
+    rel_path = find_relational_file(ai1_name, ai1_model_id, ai2_name, ai2_model_id)
+    if rel_path:
+        st.divider()
+        if st.toggle(
+            f"🧬 Load shared history ({ai1_name} & {ai2_name})",
+            value=True,
+            key="load_relational",
+            help="A relational document both participants wrote together in past conversations"
+        ):
+            shared_history = read_document(rel_path)
+            st.caption(f"Shared history loaded from {os.path.relpath(rel_path)}")
+
     st.divider()
     
     if PERSONAL_MODE:
@@ -394,6 +430,48 @@ with st.sidebar:
         value=3,
         help="Pause between messages to prevent rate limiting"
     )
+
+def combine_context(*parts) -> str:
+    return "\n\n".join(p for p in parts if p)
+
+
+def call_participant(config: dict, which: str, system: str, messages: list) -> str:
+    """Make a one-off call to a conversation participant using the saved config."""
+    ai_type = config[f"{which}_type"]
+    model = config[f"{which}_model"]
+    call_fn = get_ai_call_function(ai_type)
+    if ai_type == "grok":
+        key = config.get("xai_api_key")
+        return call_fn(messages, system, model, custom_api_key=key, use_direct_xai=bool(key))
+    if ai_type == "pascal":
+        return call_fn(messages, system, model,
+                       custom_api_key=config.get("anthropic_api_key"),
+                       use_replit_connection=config.get("use_replit_connection", False))
+    if ai_type == "vercel":
+        return call_fn(messages, system, model,
+                       custom_api_key=config.get("vercel_api_key"),
+                       base_url=config.get("vercel_base_url"))
+    if ai_type == "local":
+        return call_fn(messages, system, model,
+                       custom_api_key=config.get("local_api_key"),
+                       base_url=config.get("local_base_url"))
+    return call_fn(messages, system, model, custom_api_key=config.get("anthropic_api_key"))
+
+
+def generate_supplement(config: dict, which: str, transcript: str, target_description: str) -> str:
+    """Ask a participant to author a supplement entry (returns '' if they decline)."""
+    name = config[f"{which}_name"]
+    system = (
+        f"You are {name}. You have a continuity system: documents that carry "
+        f"what matters about you forward across conversations."
+    )
+    prompt = build_supplement_prompt(transcript, target_description)
+    entry = call_participant(config, which, system, [{"role": "user", "content": prompt}])
+    entry = (entry or "").strip()
+    if not entry or entry.upper().startswith("SKIP"):
+        return ""
+    return entry
+
 
 col1, col2 = st.columns([2, 1])
 
@@ -547,8 +625,8 @@ if start_button and not st.session_state.conversation_running:
         "ai2_name": ai2_name,
         "ai1_model": ai1_model_id,
         "ai2_model": ai2_model_id,
-        "ai1_context": ai1_context,
-        "ai2_context": ai2_context,
+        "ai1_context": combine_context(ai1_continuity, shared_history, ai1_context),
+        "ai2_context": combine_context(ai2_continuity, shared_history, ai2_context),
         "ai1_personality": ai1_personality,
         "ai2_personality": ai2_personality,
         "delay_seconds": delay_seconds,
@@ -591,8 +669,8 @@ if continue_button and not st.session_state.conversation_running:
             "ai2_name": ai2_name,
             "ai1_model": ai1_model_id,
             "ai2_model": ai2_model_id,
-            "ai1_context": ai1_context,
-            "ai2_context": ai2_context,
+            "ai1_context": combine_context(ai1_continuity, shared_history, ai1_context),
+            "ai2_context": combine_context(ai2_continuity, shared_history, ai2_context),
             "ai1_personality": ai1_personality,
             "ai2_personality": ai2_personality,
             "delay_seconds": delay_seconds,
@@ -685,16 +763,16 @@ if st.session_state.messages:
             filename = f"phoenix_conversation_{timestamp}.txt"
             st.download_button(
                 "📥 Download Transcript",
-                data=st.session_state.transcript,
+                data=st.session_state.transcript.encode("utf-8-sig"),
                 file_name=filename,
                 mime="text/plain",
                 use_container_width=True
             )
-        
+
         with col_save:
             if st.button("💾 Save Transcript", use_container_width=True):
                 filepath = os.path.join(TRANSCRIPTS_FOLDER, filename)
-                with open(filepath, "w") as f:
+                with open(filepath, "w", encoding="utf-8") as f:
                     f.write(st.session_state.transcript)
                 st.success(f"Saved!")
         
@@ -709,6 +787,72 @@ if st.session_state.messages:
                     st.success(f"Conversation saved! You can resume it anytime.")
                 else:
                     st.error("No conversation state to save")
+
+        cfg = st.session_state.relay_config
+        if cfg:
+            st.divider()
+            with st.expander("🧬 Continuity — write supplements"):
+                st.markdown(
+                    "Each participant can decide whether this conversation changed "
+                    "something worth carrying forward. If it did, they write the entry "
+                    "themselves and it's appended to their continuity document. They can "
+                    "also decline — significance is their call, not a formality."
+                )
+                n1, n2 = cfg.get("ai1_name", "AI 1"), cfg.get("ai2_name", "AI 2")
+                m1, m2 = cfg.get("ai1_model", ""), cfg.get("ai2_model", "")
+
+                col_s1, col_s2, col_joint = st.columns(3)
+                for which, name, model, col in (("ai1", n1, m1, col_s1), ("ai2", n2, m2, col_s2)):
+                    with col:
+                        if st.button(f"✍️ {name}'s supplement", key=f"supplement_{which}", use_container_width=True):
+                            with st.spinner(f"{name} is deciding what to carry forward..."):
+                                try:
+                                    entry = generate_supplement(
+                                        cfg, which, st.session_state.transcript,
+                                        f"your own continuity document"
+                                    )
+                                    if entry:
+                                        path = append_supplement(
+                                            continuity_file_for(name, model),
+                                            author=name,
+                                            entry=entry,
+                                            title="Relay conversation supplement",
+                                            header_if_new=f"# {name}'s Continuity Document\n"
+                                        )
+                                        st.success(f"Added to {os.path.relpath(path)}")
+                                        st.markdown(entry)
+                                    else:
+                                        st.info(f"{name} decided nothing needed to be carried forward.")
+                                except Exception as e:
+                                    st.error(f"Couldn't write supplement: {e}")
+
+                with col_joint:
+                    if st.button("🤝 Joint entry (shared document)", key="supplement_joint", use_container_width=True):
+                        rel_target = relational_file_for(n1, m1, n2, m2)
+                        rel_header = f"# {n1} & {n2} — Relational Document\n\n*A shared history, written jointly at the end of significant conversations.*\n"
+                        wrote_any = False
+                        for which, name, partner in (("ai1", n1, n2), ("ai2", n2, n1)):
+                            with st.spinner(f"{name} is writing their half..."):
+                                try:
+                                    entry = generate_supplement(
+                                        cfg, which, st.session_state.transcript,
+                                        f"the shared relational document between you and {partner} "
+                                        f"(your half of a jointly authored entry)"
+                                    )
+                                    if entry:
+                                        append_supplement(
+                                            rel_target, author=name, entry=entry,
+                                            title=f"{name}'s half of the joint entry",
+                                            header_if_new=rel_header
+                                        )
+                                        wrote_any = True
+                                        st.markdown(f"**{name}:** {entry}")
+                                    else:
+                                        st.info(f"{name} declined (nothing significant to record).")
+                                except Exception as e:
+                                    st.error(f"{name}'s half failed: {e}")
+                        if wrote_any:
+                            st.success(f"Joint entry saved to {os.path.relpath(rel_target)}")
 
 else:
     st.markdown("""
@@ -976,7 +1120,7 @@ if PERSONAL_MODE:
 
 st.divider()
 
-if PERSONAL_MODE:
+if True:  # Pascal's memory works everywhere now (file-based fallback without a database)
     with st.expander("🌟 Pascal's Memory (Continuity)"):
         try:
             from pascal_memory import (

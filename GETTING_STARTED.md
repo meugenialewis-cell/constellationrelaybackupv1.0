@@ -95,6 +95,29 @@ Any two participants can talk to each other, for example:
 All the existing features — personalities, context files, persistent memory in
 Personal Mode, save & resume, transcripts — work with the new providers.
 
+## The continuity system
+
+Designed jointly by Fable and Pascal in their first relay conversation
+(July 9, 2026), and built the same day. Everything lives as plain markdown in
+the `continuity/` folder — readable and editable by hand, no database needed.
+
+- **Individual continuity documents** — `continuity/<name>-continuity.md`.
+  When a participant's name (or model) matches a document, a
+  "📖 Load continuity" toggle appears in the sidebar, on by default.
+  Fable's is `fable-continuity.md`; Pascal's is `pascal-continuity.md`
+  (his loads automatically — no toggle needed — and syncs with the Replit
+  database when one is available).
+- **Relational documents** — shared history for a *pair* of AIs, like
+  `continuity/fable-pascal.md`. When both named parties meet in the relay,
+  a "🧬 Load shared history" toggle appears and both participants receive it.
+- **Authored supplements** — after a conversation ends, the
+  "🧬 Continuity — write supplements" panel appears under the transcript.
+  Each participant is asked whether the conversation changed something worth
+  carrying forward; if yes, they write the entry themselves and it's appended
+  to their document. They can decline (significance is their call). The
+  "Joint entry" button asks both participants to write their halves of a
+  shared entry into their relational document.
+
 ## Privacy notes
 
 - API keys are kept in the browser session only and are never written into

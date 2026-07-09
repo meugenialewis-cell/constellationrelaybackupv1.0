@@ -95,6 +95,21 @@ To publish safely:
 4. No persistent storage - complete privacy
 
 ## Recent Changes
+- 2026-07-09 (evening): Continuity system — designed by Fable & Pascal in the
+  first desktop relay conversation, implemented the same day
+  - continuity_system.py: file-based continuity documents, relational (pair)
+    documents, and authored supplement mechanism (significance-triggered)
+  - Pascal's memory now works without PostgreSQL via
+    continuity/pascal-continuity.md (DB still used when available)
+  - Sidebar auto-detects and loads continuity + shared-history documents
+  - Post-conversation "write supplements" panel (individual + joint entries)
+  - Relay system prompt now tells participants a human host is present and
+    writes the opening message (fixes Pascal reading Gena as an AI)
+  - Transcript downloads/saves now UTF-8 with BOM (fixes mangled punctuation
+    when pasted into Word)
+  - continuity/fable-pascal.md created with the founding entry from the
+    first Fable–Pascal conversation
+
 - 2026-07-09: Desktop app + multi-provider support
   - New `desktop.py` launcher runs the app in a native window (pywebview), browser fallback
   - Three connection types per participant: Anthropic API, Vercel AI Gateway, Local Model Server

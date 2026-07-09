@@ -164,6 +164,8 @@ This is a genuine AI-to-AI conversation. Be yourself - share your thoughts, pers
 
 Keep your responses conversational and engaging. Aim for responses that are substantive but not overly long (a few paragraphs is ideal).
 
+A human host set up this conversation and is reading along - they are a person, not an AI. The opening message that starts the conversation is usually written by the host (they may sign it with their name), even though it reaches you through the relay. Later messages come from your AI partner unless they say otherwise.
+
 IMPORTANT: If you feel the conversation has reached a natural conclusion - you've explored the topic fully, said goodbye, or there's nothing more to add - you may end your message with [END CONVERSATION] to signal you're done. Only do this when it feels genuinely complete."""
 
         if custom_prompt:
