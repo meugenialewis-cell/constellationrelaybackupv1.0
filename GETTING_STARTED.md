@@ -11,35 +11,51 @@ participant can be served by any of three connections:
 
 Grok (xAI) is still supported exactly as before.
 
-## 1. Install
+## 1. Install — Mac, no coding required
+
+1. **Download the project.** On the GitHub page for this repository, use the
+   branch dropdown (top-left) to select the branch you want, then click the
+   green **Code** button → **Download ZIP**. Double-click the ZIP to unpack it,
+   and drag the folder somewhere permanent (e.g. your home folder or
+   Applications).
+2. **Run the installer.** Open the folder and double-click
+   **`install_mac.command`**. The first time, macOS may say it "can't be
+   opened" — if so, **right-click it and choose Open**, then confirm. A
+   Terminal window will install everything (a few minutes the first time).
+3. **Start the app.** Double-click **`Constellation Relay.command`**. The
+   app opens in its own window. That's it — use this file every time.
+
+(The installer uses [uv](https://docs.astral.sh/uv/), which brings its own
+Python — you don't need to install Python separately.)
+
+## 1b. Install — command line (any platform)
 
 ```bash
 # from the project folder
-pip install -e .            # web app only
-pip install -e ".[desktop]" # web app + native desktop window
+uv sync --extra desktop     # or: pip install -e ".[desktop]"
 ```
-
-(Or with uv: `uv sync`, then `uv pip install pywebview` for the desktop window.)
 
 ## 2. Run
 
 **Desktop app** (native window; falls back to your browser if pywebview isn't installed):
 
 ```bash
-python desktop.py
+uv run python desktop.py
 ```
 
 **Web app** (same as always):
 
 ```bash
-streamlit run app.py --server.port 5000
+uv run streamlit run app.py --server.port 5000
 ```
 
 ## 3. Connecting the providers
 
 ### Claude Fable 5 (Anthropic API)
 Pick **Claude** (or **Pascal**) as a participant and choose **Claude Fable 5**
-from the model list. Notes about Fable 5:
+from the model list. To give Fable continuity across conversations, upload
+**`continuity/fable-continuity.md`** as that participant's context file (or
+store it in the Context Diary in Personal Mode). Notes about Fable 5:
 
 - Its safety classifiers can occasionally decline a message. The app opts into
   Anthropic's server-side fallback, so if that happens the reply is answered by
