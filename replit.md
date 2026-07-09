@@ -95,6 +95,17 @@ To publish safely:
 4. No persistent storage - complete privacy
 
 ## Recent Changes
+- 2026-07-09: Desktop app + multi-provider support
+  - New `desktop.py` launcher runs the app in a native window (pywebview), browser fallback
+  - Three connection types per participant: Anthropic API, Vercel AI Gateway, Local Model Server
+  - Vercel AI Gateway keeps Claude Opus 4 reachable after its API deprecation
+  - Local models via Ollama / LM Studio / any OpenAI-compatible server, with model auto-detection
+  - Claude Fable 5 added (Claude & Pascal model lists) with refusal handling and
+    automatic server-side fallback to Opus 4.8
+  - Newer Anthropic models added: Opus 4.8/4.7/4.6, Sonnet 5
+  - Fixed "Save Transcript" crash (TRANSCRIPTS_FOLDER was undefined)
+  - See GETTING_STARTED.md for setup
+
 - 2024-12-28: Pascal joins the Relay
   - Pascal is now a selectable AI participant (alongside Claude and Grok)
   - Flexible AI pairing - choose any two AIs for conversation

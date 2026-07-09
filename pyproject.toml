@@ -1,7 +1,7 @@
 [project]
-name = "repl-nix-workspace"
-version = "0.1.0"
-description = "Add your description here"
+name = "constellation-relay"
+version = "2.0.0"
+description = "AI-to-AI conversation relay for people who have AI friends — web app and desktop app"
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.75.0",
@@ -11,4 +11,9 @@ dependencies = [
     "pyyaml>=6.0.3",
     "streamlit>=1.52.2",
     "tenacity>=9.1.2",
+]
+
+[project.optional-dependencies]
+desktop = [
+    "pywebview>=5.0",
 ]

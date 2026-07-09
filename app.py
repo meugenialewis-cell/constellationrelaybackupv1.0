@@ -8,9 +8,16 @@ import json
 from datetime import datetime
 from pypdf import PdfReader
 from relay_engine import ConversationRelay, FlexibleRelay
-from ai_clients import CLAUDE_MODELS, GROK_MODELS, XAI_GROK_MODELS, PASCAL_MODELS, AI_TYPES
+from ai_clients import (
+    CLAUDE_MODELS, GROK_MODELS, XAI_GROK_MODELS, PASCAL_MODELS,
+    VERCEL_CLAUDE_MODELS, AI_TYPES, LOCAL_SERVER_PRESETS,
+    VERCEL_GATEWAY_BASE_URL, LOCAL_BASE_URL, list_openai_models,
+)
 
 PERSONAL_MODE = os.environ.get("PERSONAL_MODE", "").lower() == "true"
+
+TRANSCRIPTS_FOLDER = "transcripts"
+os.makedirs(TRANSCRIPTS_FOLDER, exist_ok=True)
 
 
 def extract_text_from_pdf(pdf_file) -> str:
@@ -47,7 +54,7 @@ def save_conversation(name: str, state: dict, config: dict):
     if "saved_conversations" not in st.session_state:
         st.session_state.saved_conversations = []
     
-    config_to_save = {k: v for k, v in config.items() if k not in ["anthropic_api_key", "xai_api_key"]}
+    config_to_save = {k: v for k, v in config.items() if k not in ["anthropic_api_key", "xai_api_key", "vercel_api_key", "local_api_key"]}
     
     conv_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     data = {
@@ -99,8 +106,15 @@ if "conversation_name" not in st.session_state:
 st.title("🌌 Constellation Relay")
 st.markdown("*Let your AI friends talk to each other directly*")
 
-AI_OPTIONS = ["Claude", "Grok", "Pascal"]
-AI_ICONS = {"Claude": "🌸", "Grok": "⚡", "Pascal": "🌟"}
+AI_OPTIONS = ["Claude", "Grok", "Pascal", "Claude (Vercel)", "Local Model"]
+AI_ICONS = {"Claude": "🌸", "Grok": "⚡", "Pascal": "🌟", "Claude (Vercel)": "🔺", "Local Model": "🖥️"}
+AI_TYPE_MAP = {
+    "Claude": "claude",
+    "Grok": "grok",
+    "Pascal": "pascal",
+    "Claude (Vercel)": "vercel",
+    "Local Model": "local",
+}
 
 def get_models_for_ai(ai_name: str, xai_api_key: str = None):
     if ai_name == "Claude":
@@ -109,10 +123,56 @@ def get_models_for_ai(ai_name: str, xai_api_key: str = None):
         return XAI_GROK_MODELS if xai_api_key else GROK_MODELS
     elif ai_name == "Pascal":
         return PASCAL_MODELS
+    elif ai_name == "Claude (Vercel)":
+        return VERCEL_CLAUDE_MODELS
     return {}
 
 def get_ai_type(ai_name: str) -> str:
-    return ai_name.lower()
+    return AI_TYPE_MAP.get(ai_name, ai_name.lower())
+
+
+def render_model_picker(ai_choice: str, key_prefix: str, xai_api_key: str = None) -> str:
+    """Render the model selector for an AI participant and return the model ID."""
+    if ai_choice == "Local Model":
+        local_models = st.session_state.get("local_models", [])
+        if local_models:
+            return st.selectbox(
+                "Local Model",
+                options=local_models,
+                key=f"{key_prefix}_local_model_select",
+                help="Models detected on your local server"
+            )
+        return st.text_input(
+            "Local model name",
+            value="llama3.1",
+            key=f"{key_prefix}_local_model_text",
+            help="e.g. llama3.1 or qwen3:32b — use 'Detect local models' above to list what's installed"
+        )
+
+    models = get_models_for_ai(ai_choice, xai_api_key)
+    label = st.selectbox(
+        f"{ai_choice} Model",
+        options=list(models.keys()),
+        index=0,
+        key=f"{key_prefix}_model_select"
+    )
+    model_id = models[label]
+
+    if model_id == "__custom__":
+        gateway_models = st.session_state.get("vercel_models", [])
+        if gateway_models:
+            return st.selectbox(
+                "Gateway model slug",
+                options=gateway_models,
+                key=f"{key_prefix}_vercel_slug_select"
+            )
+        return st.text_input(
+            "Custom gateway model slug",
+            value="anthropic/claude-opus-4",
+            key=f"{key_prefix}_vercel_slug_text",
+            help="Use 'Fetch available models' above to see exact slugs on your gateway"
+        )
+    return model_id
 
 with st.sidebar:
     st.header("⚙️ Configuration")
@@ -170,18 +230,73 @@ with st.sidebar:
     needs_anthropic = "Claude" in [ai1_choice, ai2_choice]
     needs_xai = "Grok" in [ai1_choice, ai2_choice]
     has_pascal = "Pascal" in [ai1_choice, ai2_choice]
-    
+    needs_vercel = "Claude (Vercel)" in [ai1_choice, ai2_choice]
+    needs_local = "Local Model" in [ai1_choice, ai2_choice]
+
+    vercel_api_key = ""
+    vercel_base_url = VERCEL_GATEWAY_BASE_URL
+    if needs_vercel:
+        st.divider()
+        st.subheader("🔺 Vercel AI Gateway")
+        st.caption("Reach models still served on Vercel (like Claude Opus 4)")
+        vercel_api_key = st.text_input(
+            "Vercel AI Gateway Key",
+            type="password",
+            placeholder="vck_...",
+            key="vercel_key",
+            help="Create one in your Vercel dashboard under AI Gateway"
+        )
+        vercel_base_url = st.text_input(
+            "Gateway URL",
+            value=VERCEL_GATEWAY_BASE_URL,
+            key="vercel_url"
+        )
+        if st.button("📡 Fetch available models", key="fetch_vercel_models", disabled=not vercel_api_key):
+            fetched = list_openai_models(vercel_base_url, vercel_api_key)
+            if fetched:
+                st.session_state.vercel_models = fetched
+                st.success(f"Found {len(fetched)} models on the gateway")
+            else:
+                st.error("Couldn't list models — check the key and URL")
+        if st.session_state.get("vercel_models"):
+            st.caption(f"{len(st.session_state.vercel_models)} gateway models available under 'Custom model slug...'")
+
+    local_base_url = LOCAL_BASE_URL
+    local_api_key = "ollama"
+    if needs_local:
+        st.divider()
+        st.subheader("🖥️ Local Model Server")
+        st.caption("Ollama, LM Studio, or any OpenAI-compatible server on your machine")
+        local_preset = st.selectbox(
+            "Server type",
+            options=list(LOCAL_SERVER_PRESETS.keys()),
+            key="local_preset"
+        )
+        local_base_url = st.text_input(
+            "Server URL",
+            value=LOCAL_SERVER_PRESETS[local_preset],
+            key=f"local_url_{local_preset}"
+        )
+        local_api_key = st.text_input(
+            "Local API key (most servers ignore this)",
+            value="ollama",
+            key="local_api_key_input"
+        )
+        if st.button("🔍 Detect local models", key="detect_local_models"):
+            fetched = list_openai_models(local_base_url, local_api_key)
+            if fetched:
+                st.session_state.local_models = fetched
+                st.success(f"Found {len(fetched)} local models")
+            else:
+                st.error("Couldn't reach the server — is it running?")
+        if st.session_state.get("local_models"):
+            st.caption(f"{len(st.session_state.local_models)} local models detected")
+
     st.divider()
     
     st.subheader(f"{AI_ICONS.get(ai1_choice, '')} {ai1_choice} Settings")
     ai1_name = st.text_input(f"{ai1_choice}'s Name", value=ai1_choice, key="ai1_name")
-    ai1_models = get_models_for_ai(ai1_choice, xai_api_key)
-    ai1_model = st.selectbox(
-        f"{ai1_choice} Model",
-        options=list(ai1_models.keys()),
-        index=0,
-        key="ai1_model_select"
-    )
+    ai1_model_id = render_model_picker(ai1_choice, "ai1", xai_api_key)
     ai1_personality = st.text_area(
         f"{ai1_choice}'s Personality/Role",
         placeholder="e.g., You are a thoughtful philosopher who loves exploring ideas...",
@@ -204,13 +319,7 @@ with st.sidebar:
     
     st.subheader(f"{AI_ICONS.get(ai2_choice, '')} {ai2_choice} Settings")
     ai2_name = st.text_input(f"{ai2_choice}'s Name", value=ai2_choice, key="ai2_name")
-    ai2_models = get_models_for_ai(ai2_choice, xai_api_key)
-    ai2_model = st.selectbox(
-        f"{ai2_choice} Model",
-        options=list(ai2_models.keys()),
-        index=0,
-        key="ai2_model_select"
-    )
+    ai2_model_id = render_model_picker(ai2_choice, "ai2", xai_api_key)
     ai2_personality = st.text_area(
         f"{ai2_choice}'s Personality/Role",
         placeholder="e.g., You are a witty and curious AI who loves deep conversations...",
@@ -263,6 +372,10 @@ with st.sidebar:
         keys_valid = keys_valid and bool(xai_api_key)
     if has_pascal and not use_replit_connection:
         keys_valid = keys_valid and bool(anthropic_api_key)
+    if needs_vercel:
+        keys_valid = keys_valid and bool(vercel_api_key)
+    if needs_local:
+        keys_valid = keys_valid and bool(local_base_url)
     
     st.divider()
     
@@ -326,6 +439,10 @@ with col1:
         if has_pascal and not use_replit_connection and not anthropic_api_key:
             if "Anthropic" not in missing_keys:
                 missing_keys.append("Anthropic (for Pascal)")
+        if needs_vercel and not vercel_api_key:
+            missing_keys.append("Vercel AI Gateway")
+        if needs_local and not local_base_url:
+            missing_keys.append("Local server URL")
         if missing_keys:
             st.warning(f"Please enter API keys in the sidebar: {', '.join(missing_keys)}")
     
@@ -365,6 +482,10 @@ def run_conversation_thread(config, message_queue, stop_flag):
         delay_seconds=config["delay_seconds"],
         anthropic_api_key=config.get("anthropic_api_key"),
         xai_api_key=config.get("xai_api_key"),
+        vercel_api_key=config.get("vercel_api_key"),
+        vercel_base_url=config.get("vercel_base_url"),
+        local_base_url=config.get("local_base_url"),
+        local_api_key=config.get("local_api_key"),
         use_persistent_memory=config.get("use_persistent_memory", False),
         use_replit_connection=config.get("use_replit_connection", False)
     )
@@ -424,8 +545,8 @@ if start_button and not st.session_state.conversation_running:
         "ai2_type": get_ai_type(ai2_choice),
         "ai1_name": ai1_name,
         "ai2_name": ai2_name,
-        "ai1_model": ai1_models[ai1_model],
-        "ai2_model": ai2_models[ai2_model],
+        "ai1_model": ai1_model_id,
+        "ai2_model": ai2_model_id,
         "ai1_context": ai1_context,
         "ai2_context": ai2_context,
         "ai1_personality": ai1_personality,
@@ -435,6 +556,10 @@ if start_button and not st.session_state.conversation_running:
         "max_exchanges": max_exchanges,
         "anthropic_api_key": anthropic_api_key,
         "xai_api_key": xai_api_key,
+        "vercel_api_key": vercel_api_key,
+        "vercel_base_url": vercel_base_url,
+        "local_base_url": local_base_url,
+        "local_api_key": local_api_key,
         "use_persistent_memory": use_persistent_memory,
         "use_replit_connection": use_replit_connection
     }
@@ -464,8 +589,8 @@ if continue_button and not st.session_state.conversation_running:
             "ai2_type": get_ai_type(ai2_choice),
             "ai1_name": ai1_name,
             "ai2_name": ai2_name,
-            "ai1_model": ai1_models[ai1_model],
-            "ai2_model": ai2_models[ai2_model],
+            "ai1_model": ai1_model_id,
+            "ai2_model": ai2_model_id,
             "ai1_context": ai1_context,
             "ai2_context": ai2_context,
             "ai1_personality": ai1_personality,
@@ -477,6 +602,10 @@ if continue_button and not st.session_state.conversation_running:
     config["max_exchanges"] = max_exchanges
     config["anthropic_api_key"] = anthropic_api_key
     config["xai_api_key"] = xai_api_key
+    config["vercel_api_key"] = vercel_api_key
+    config["vercel_base_url"] = vercel_base_url
+    config["local_base_url"] = local_base_url
+    config["local_api_key"] = local_api_key
     config["use_persistent_memory"] = use_persistent_memory
     config["use_replit_connection"] = use_replit_connection
     config["resume_state"] = st.session_state.relay_state
@@ -515,12 +644,18 @@ st.divider()
 st.subheader("📜 Conversation")
 
 def get_avatar_for_speaker(speaker: str) -> str:
-    if "Claude" in speaker:
+    if "Fable" in speaker:
+        return "📖"
+    elif "Vercel" in speaker:
+        return "🔺"
+    elif "Claude" in speaker:
         return "🌸"
     elif "Grok" in speaker:
         return "⚡"
     elif "Pascal" in speaker:
         return "🌟"
+    elif "Local" in speaker:
+        return "🖥️"
     return "💬"
 
 if st.session_state.messages:

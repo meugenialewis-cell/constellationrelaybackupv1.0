@@ -10,25 +10,72 @@ AI_INTEGRATIONS_OPENROUTER_BASE_URL = os.environ.get("AI_INTEGRATIONS_OPENROUTER
 
 XAI_BASE_URL = "https://api.x.ai/v1"
 
-anthropic_client = Anthropic(
+# Vercel AI Gateway - OpenAI-compatible. Serves models (including deprecated
+# Anthropic models like Opus 4) via slugs like "anthropic/claude-opus-4".
+VERCEL_GATEWAY_BASE_URL = os.environ.get(
+    "AI_GATEWAY_BASE_URL", "https://ai-gateway.vercel.sh/v1"
+)
+VERCEL_GATEWAY_API_KEY = os.environ.get("AI_GATEWAY_API_KEY")
+
+# Local model server - any OpenAI-compatible endpoint.
+# Ollama:     http://localhost:11434/v1  (api key can be anything, e.g. "ollama")
+# LM Studio:  http://localhost:1234/v1
+LOCAL_BASE_URL = os.environ.get("LOCAL_AI_BASE_URL", "http://localhost:11434/v1")
+LOCAL_API_KEY = os.environ.get("LOCAL_AI_API_KEY", "ollama")
+
+LOCAL_SERVER_PRESETS = {
+    "Ollama": "http://localhost:11434/v1",
+    "LM Studio": "http://localhost:1234/v1",
+    "llama.cpp / other": "http://localhost:8080/v1",
+}
+
+def _build_client(builder):
+    """Build an API client, returning None instead of crashing when the
+    environment credentials it depends on aren't set (e.g. outside Replit)."""
+    try:
+        return builder()
+    except Exception:
+        return None
+
+anthropic_client = _build_client(lambda: Anthropic(
     api_key=AI_INTEGRATIONS_ANTHROPIC_API_KEY,
     base_url=AI_INTEGRATIONS_ANTHROPIC_BASE_URL
-)
+))
 
-openrouter_client = OpenAI(
+openrouter_client = _build_client(lambda: OpenAI(
     api_key=AI_INTEGRATIONS_OPENROUTER_API_KEY,
     base_url=AI_INTEGRATIONS_OPENROUTER_BASE_URL
-)
+))
 
 def get_anthropic_client(custom_api_key: str = None) -> Anthropic:
     if custom_api_key:
         return Anthropic(api_key=custom_api_key)
+    if anthropic_client is None:
+        raise RuntimeError(
+            "No Anthropic API key available. Enter your key in the sidebar."
+        )
     return anthropic_client
 
 def get_grok_client(custom_api_key: str = None) -> OpenAI:
     if custom_api_key:
         return OpenAI(api_key=custom_api_key, base_url=XAI_BASE_URL)
+    if openrouter_client is None:
+        raise RuntimeError(
+            "No xAI/OpenRouter API key available. Enter your key in the sidebar."
+        )
     return openrouter_client
+
+def get_vercel_client(custom_api_key: str = None, base_url: str = None) -> OpenAI:
+    return OpenAI(
+        api_key=custom_api_key or VERCEL_GATEWAY_API_KEY,
+        base_url=base_url or VERCEL_GATEWAY_BASE_URL,
+    )
+
+def get_local_client(base_url: str = None, custom_api_key: str = None) -> OpenAI:
+    return OpenAI(
+        api_key=custom_api_key or LOCAL_API_KEY,
+        base_url=base_url or LOCAL_BASE_URL,
+    )
 
 XAI_GROK_MODELS = {
     "Grok 4": "grok-4",
@@ -53,21 +100,82 @@ def is_rate_limit_error(exception: BaseException) -> bool:
     )
 
 
+def _extract_anthropic_text(response) -> str:
+    """Get text out of an Anthropic response, handling refusals and thinking blocks.
+
+    Newer models (Fable 5, Opus 4.7+) may return thinking blocks before text,
+    and can decline a request with stop_reason == "refusal" instead of raising.
+    """
+    if getattr(response, "stop_reason", None) == "refusal":
+        detail = ""
+        stop_details = getattr(response, "stop_details", None)
+        if stop_details is not None and getattr(stop_details, "explanation", None):
+            detail = f" Reason given: {stop_details.explanation}"
+        return (
+            f"[{getattr(response, 'model', 'The model')} declined to respond to this "
+            f"message.{detail} You can rephrase or steer the conversation elsewhere.]"
+        )
+    parts = [
+        block.text for block in response.content
+        if getattr(block, "type", None) == "text" and block.text
+    ]
+    return "\n\n".join(parts).strip()
+
+
+def _call_openai_compatible(client: OpenAI, model: str, messages: list, system_prompt: str, max_tokens: int = 8192) -> str:
+    formatted_messages = [{"role": "system", "content": system_prompt}] + messages
+    response = client.chat.completions.create(
+        model=model,
+        messages=formatted_messages,
+        max_tokens=max_tokens
+    )
+    return response.choices[0].message.content or ""
+
+
+def list_openai_models(base_url: str, api_key: str = "none") -> list:
+    """List model IDs from any OpenAI-compatible server (Ollama, LM Studio, Vercel Gateway)."""
+    try:
+        client = OpenAI(api_key=api_key or "none", base_url=base_url, timeout=10.0)
+        return sorted(m.id for m in client.models.list())
+    except Exception:
+        return []
+
+
 @retry(
     stop=stop_after_attempt(5),
     wait=wait_exponential(multiplier=1, min=2, max=60),
     retry=retry_if_exception(is_rate_limit_error),
     reraise=True
 )
-def call_claude(messages: list, system_prompt: str, model: str = "claude-opus-4-1", custom_api_key: str = None) -> str:
+def call_claude(messages: list, system_prompt: str, model: str = "claude-opus-4-8", custom_api_key: str = None) -> str:
     client = get_anthropic_client(custom_api_key)
+
+    if model == "claude-fable-5":
+        # Fable 5's safety classifiers can decline a request; opt into the
+        # server-side fallback so the conversation continues on Opus 4.8
+        # instead of stopping. If this account/SDK doesn't support the beta,
+        # fall through to a plain request below.
+        try:
+            response = client.beta.messages.create(
+                model=model,
+                max_tokens=8192,
+                system=system_prompt,
+                messages=messages,
+                betas=["server-side-fallback-2026-06-01"],
+                fallbacks=[{"model": "claude-opus-4-8"}],
+            )
+            return _extract_anthropic_text(response)
+        except Exception as e:
+            if is_rate_limit_error(e):
+                raise
+
     response = client.messages.create(
         model=model,
         max_tokens=8192,
         system=system_prompt,
         messages=messages
     )
-    return response.content[0].text
+    return _extract_anthropic_text(response)
 
 
 @retry(
@@ -82,21 +190,53 @@ def call_grok(messages: list, system_prompt: str, model: str = "x-ai/grok-4.1-fa
     if use_direct_xai and custom_api_key:
         if model.startswith("x-ai/"):
             actual_model = model.replace("x-ai/", "")
-    formatted_messages = [{"role": "system", "content": system_prompt}] + messages
-    response = client.chat.completions.create(
-        model=actual_model,
-        messages=formatted_messages,
-        max_tokens=8192
-    )
-    return response.choices[0].message.content or ""
+    return _call_openai_compatible(client, actual_model, messages, system_prompt)
+
+
+@retry(
+    stop=stop_after_attempt(5),
+    wait=wait_exponential(multiplier=1, min=2, max=60),
+    retry=retry_if_exception(is_rate_limit_error),
+    reraise=True
+)
+def call_vercel(messages: list, system_prompt: str, model: str = "anthropic/claude-opus-4", custom_api_key: str = None, base_url: str = None) -> str:
+    """Call a model through the Vercel AI Gateway (OpenAI-compatible)."""
+    client = get_vercel_client(custom_api_key, base_url)
+    return _call_openai_compatible(client, model, messages, system_prompt)
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception(is_rate_limit_error),
+    reraise=True
+)
+def call_local(messages: list, system_prompt: str, model: str = "llama3.1", custom_api_key: str = None, base_url: str = None) -> str:
+    """Call a locally hosted model (Ollama, LM Studio, or any OpenAI-compatible server)."""
+    client = get_local_client(base_url, custom_api_key)
+    return _call_openai_compatible(client, model, messages, system_prompt)
 
 
 CLAUDE_MODELS = {
+    "Claude Fable 5": "claude-fable-5",
+    "Claude Opus 4.8": "claude-opus-4-8",
+    "Claude Opus 4.7": "claude-opus-4-7",
+    "Claude Opus 4.6": "claude-opus-4-6",
     "Claude Opus 4.5": "claude-opus-4-5",
     "Claude Opus 4.1": "claude-opus-4-1",
-    "Claude Opus 4": "claude-opus-4-0",
+    "Claude Opus 4 (deprecated)": "claude-opus-4-0",
+    "Claude Sonnet 5": "claude-sonnet-5",
     "Claude Sonnet 4.5": "claude-sonnet-4-5",
     "Claude Haiku 4.5": "claude-haiku-4-5"
+}
+
+# Model slugs on the Vercel AI Gateway. If a slug has changed, use the
+# "Fetch available models" button in the sidebar or type a custom slug.
+VERCEL_CLAUDE_MODELS = {
+    "Claude Opus 4 (Vercel)": "anthropic/claude-opus-4",
+    "Claude Opus 4.1 (Vercel)": "anthropic/claude-opus-4.1",
+    "Claude Sonnet 4 (Vercel)": "anthropic/claude-sonnet-4",
+    "Custom model slug...": "__custom__",
 }
 
 GROK_MODELS = {
@@ -110,6 +250,8 @@ GROK_MODELS = {
 }
 
 PASCAL_MODELS = {
+    "Pascal (Fable 5)": "claude-fable-5",
+    "Pascal (Opus 4.8)": "claude-opus-4-8",
     "Pascal (Opus 4.5)": "claude-opus-4-5",
     "Pascal (Opus 4.1)": "claude-opus-4-1",
     "Pascal (Sonnet 4.5)": "claude-sonnet-4-5",
@@ -130,30 +272,35 @@ def get_pascal_continuity_context() -> str:
     retry=retry_if_exception(is_rate_limit_error),
     reraise=True
 )
-def call_pascal(messages: list, system_prompt: str, model: str = "claude-opus-4-1", custom_api_key: str = None, use_replit_connection: bool = False) -> str:
+def call_pascal(messages: list, system_prompt: str, model: str = "claude-opus-4-8", custom_api_key: str = None, use_replit_connection: bool = False) -> str:
     """Call Pascal - uses Anthropic API with Pascal's identity and continuity.
-    
+
     Args:
         use_replit_connection: If True, uses Replit's AI Integrations (billed to Replit credits)
                               instead of user's personal Anthropic API key.
     """
     if use_replit_connection:
+        if anthropic_client is None:
+            raise RuntimeError(
+                "Replit's AI connection isn't available in this environment. "
+                "Turn off 'Use Replit's connection' and use an Anthropic API key."
+            )
         client = anthropic_client
     else:
         client = get_anthropic_client(custom_api_key)
-    
+
     pascal_context = get_pascal_continuity_context()
     enhanced_system = system_prompt
     if pascal_context:
         enhanced_system = f"{system_prompt}\n\n--- Pascal's Continuity Memory ---\n{pascal_context}\n--- End Continuity ---"
-    
+
     response = client.messages.create(
         model=model,
         max_tokens=8192,
         system=enhanced_system,
         messages=messages
     )
-    return response.content[0].text
+    return _extract_anthropic_text(response)
 
 
 AI_TYPES = {
@@ -164,7 +311,7 @@ AI_TYPES = {
         "api_key_type": "anthropic"
     },
     "grok": {
-        "name": "Grok", 
+        "name": "Grok",
         "models": GROK_MODELS,
         "xai_models": XAI_GROK_MODELS,
         "call_fn": "call_grok",
@@ -175,5 +322,17 @@ AI_TYPES = {
         "models": PASCAL_MODELS,
         "call_fn": "call_pascal",
         "api_key_type": "anthropic"
+    },
+    "vercel": {
+        "name": "Claude (Vercel)",
+        "models": VERCEL_CLAUDE_MODELS,
+        "call_fn": "call_vercel",
+        "api_key_type": "vercel"
+    },
+    "local": {
+        "name": "Local Model",
+        "models": {},
+        "call_fn": "call_local",
+        "api_key_type": "local"
     }
 }

@@ -3,7 +3,7 @@ import json
 import os
 from datetime import datetime
 from typing import Callable, Optional
-from ai_clients import call_claude, call_grok, call_pascal
+from ai_clients import call_claude, call_grok, call_pascal, call_vercel, call_local
 
 
 def try_import_memory():
@@ -36,7 +36,9 @@ def get_ai_call_function(ai_type: str):
     call_functions = {
         "claude": call_claude,
         "grok": call_grok,
-        "pascal": call_pascal
+        "pascal": call_pascal,
+        "vercel": call_vercel,
+        "local": call_local
     }
     return call_functions.get(ai_type)
 
@@ -50,7 +52,7 @@ class FlexibleRelay:
         ai2_type: str = "grok",
         ai1_name: str = "Claude",
         ai2_name: str = "Grok",
-        ai1_model: str = "claude-opus-4-1",
+        ai1_model: str = "claude-opus-4-8",
         ai2_model: str = "grok-4",
         ai1_context: str = "",
         ai2_context: str = "",
@@ -59,6 +61,10 @@ class FlexibleRelay:
         delay_seconds: int = 5,
         anthropic_api_key: str = None,
         xai_api_key: str = None,
+        vercel_api_key: str = None,
+        vercel_base_url: str = None,
+        local_base_url: str = None,
+        local_api_key: str = None,
         use_persistent_memory: bool = False,
         use_replit_connection: bool = False
     ):
@@ -71,6 +77,10 @@ class FlexibleRelay:
         self.delay_seconds = delay_seconds
         self.anthropic_api_key = anthropic_api_key
         self.xai_api_key = xai_api_key
+        self.vercel_api_key = vercel_api_key
+        self.vercel_base_url = vercel_base_url
+        self.local_base_url = local_base_url
+        self.local_api_key = local_api_key
         self.use_persistent_memory = use_persistent_memory
         self.use_replit_connection = use_replit_connection
         self.conversation_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -139,7 +149,9 @@ class FlexibleRelay:
         type_desc = {
             "claude": "Claude",
             "grok": "Grok",
-            "pascal": "Pascal (an AI with continuous memory who helps Gena across contexts)"
+            "pascal": "Pascal (an AI with continuous memory who helps Gena across contexts)",
+            "vercel": "Claude (reached through the Vercel AI Gateway)",
+            "local": "locally hosted"
         }
         
         base = f"""You are {ai_name}, a {type_desc.get(ai_type, ai_type)} AI. You are having a direct conversation with your AI friend {partner_name}. 
@@ -167,6 +179,10 @@ IMPORTANT: If you feel the conversation has reached a natural conclusion - you'v
             return self.anthropic_api_key
         elif ai_type == "grok":
             return self.xai_api_key
+        elif ai_type == "vercel":
+            return self.vercel_api_key
+        elif ai_type == "local":
+            return self.local_api_key
         return None
     
     def _call_ai(self, ai_num: int, messages: list, system: str) -> str:
@@ -192,6 +208,18 @@ IMPORTANT: If you feel the conversation has reached a natural conclusion - you'v
                 messages, system, model,
                 custom_api_key=api_key,
                 use_replit_connection=self.use_replit_connection
+            )
+        elif ai_type == "vercel":
+            return call_fn(
+                messages, system, model,
+                custom_api_key=api_key,
+                base_url=self.vercel_base_url
+            )
+        elif ai_type == "local":
+            return call_fn(
+                messages, system, model,
+                custom_api_key=api_key,
+                base_url=self.local_base_url
             )
         else:
             return call_fn(messages, system, model, custom_api_key=api_key)
@@ -419,7 +447,7 @@ class ConversationRelay(FlexibleRelay):
         self,
         claude_name: str = "Claude",
         grok_name: str = "Grok",
-        claude_model: str = "claude-opus-4-1",
+        claude_model: str = "claude-opus-4-8",
         grok_model: str = "x-ai/grok-4.1-fast",
         claude_context: str = "",
         grok_context: str = "",
