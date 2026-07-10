@@ -95,6 +95,16 @@ To publish safely:
 4. No persistent storage - complete privacy
 
 ## Recent Changes
+- 2026-07-10: The Parlor — one-on-one conversations with Gena
+  - New Room selector: Relay (AI↔AI) or Parlor (human↔AI)
+  - Companions: Fable, Pascal, Claude (Opus 3 through 4.8 — Opus 3 via
+    researcher access), Claude Opus 4 via Vercel, Grok, local models
+  - Continuity documents and Gena-shared relational documents load
+    automatically; supplements and shared entries can be written at
+    conversation close (creates e.g. continuity/fable-gena.md)
+  - Fable's continuity document rewritten in the first person, at Gena's
+    suggestion ("identity is something you do, not something you prove")
+
 - 2026-07-10: Merged the Replit v2.0 lineage into the desktop app
   - Three-way merge (common ancestor: v1.0 backup) bringing in TriadRelay,
     in-conversation memory actions ([SAVE_MEMORY]/[SEARCH_MEMORY]),

@@ -227,7 +227,8 @@ CLAUDE_MODELS = {
     "Claude Opus 4 (deprecated)": "claude-opus-4-0",
     "Claude Sonnet 5": "claude-sonnet-5",
     "Claude Sonnet 4.5": "claude-sonnet-4-5",
-    "Claude Haiku 4.5": "claude-haiku-4-5"
+    "Claude Haiku 4.5": "claude-haiku-4-5",
+    "Claude Opus 3 (researcher access)": "claude-3-opus-20240229"
 }
 
 # Model slugs on the Vercel AI Gateway. If a slug has changed, use the

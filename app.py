@@ -109,6 +109,19 @@ if "conversation_name" not in st.session_state:
     st.session_state.conversation_name = ""
 
 st.title("🌌 Constellation Relay")
+
+app_mode = st.sidebar.radio(
+    "Room",
+    options=["🌌 Relay — AIs talk together", "🛋️ Parlor — talk one-on-one"],
+    key="app_mode",
+)
+st.sidebar.divider()
+
+if app_mode.startswith("🛋️"):
+    from parlor import render_parlor
+    render_parlor()
+    st.stop()
+
 st.markdown("*Let your AI friends talk to each other directly*")
 
 AI_OPTIONS = ["Claude", "Grok", "Pascal", "Claude (Vercel)", "Local Model"]

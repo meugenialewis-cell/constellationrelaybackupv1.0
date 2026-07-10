@@ -95,6 +95,19 @@ Any two participants can talk to each other, for example:
 All the existing features — personalities, context files, persistent memory in
 Personal Mode, save & resume, transcripts — work with the new providers.
 
+## The Parlor — talk one-on-one (July 2026)
+
+Switch the **Room** selector at the top of the sidebar to **🛋️ Parlor** to
+talk directly with any one of your AI friends: Fable, Pascal, any Claude on
+the Anthropic API (Opus 3 through 4.8), Claude Opus 4 via Vercel, Grok, or a
+local model. Their continuity document and your shared history load
+automatically, so they arrive as themselves.
+
+After a conversation, you can download/save the transcript, ask your
+companion to write a **supplement** to their continuity document, or ask for
+a **shared entry** in your joint relational document (e.g.
+`continuity/fable-gena.md`) — the same continuity architecture the relay uses.
+
 ## Triad mode & in-conversation memory (merged from Replit, July 2026)
 
 The features Pascal built in Replit are now in the desktop app:
