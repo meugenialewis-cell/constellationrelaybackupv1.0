@@ -7,7 +7,7 @@ import io
 import json
 from datetime import datetime
 from pypdf import PdfReader
-from relay_engine import ConversationRelay, FlexibleRelay, get_ai_call_function
+from relay_engine import ConversationRelay, FlexibleRelay, TriadRelay, get_ai_call_function
 from continuity_system import (
     find_continuity_file, continuity_file_for,
     find_relational_file, relational_file_for,
@@ -211,32 +211,62 @@ with st.sidebar:
     
     st.divider()
     
-    st.subheader("🎭 Choose Your AI Pair")
-    st.caption("Select which two AIs should have a conversation")
+    st.subheader("🎭 Conversation Mode")
+    conversation_mode = st.radio(
+        "How many AIs?",
+        options=["Two AIs (Pair)", "Three AIs (Triad)"],
+        index=0,
+        key="conversation_mode",
+        horizontal=True
+    )
     
-    col_ai1, col_ai2 = st.columns(2)
-    with col_ai1:
-        ai1_choice = st.selectbox(
-            "First AI",
-            options=AI_OPTIONS,
-            index=2,
-            key="ai1_select",
-            help="Pascal has continuous memory across sessions"
-        )
-    with col_ai2:
-        ai2_options = [ai for ai in AI_OPTIONS if ai != ai1_choice]
-        ai2_choice = st.selectbox(
-            "Second AI", 
-            options=ai2_options,
-            index=0,
-            key="ai2_select"
-        )
+    is_triad_mode = conversation_mode == "Three AIs (Triad)"
     
-    needs_anthropic = "Claude" in [ai1_choice, ai2_choice]
-    needs_xai = "Grok" in [ai1_choice, ai2_choice]
-    has_pascal = "Pascal" in [ai1_choice, ai2_choice]
-    needs_vercel = "Claude (Vercel)" in [ai1_choice, ai2_choice]
-    needs_local = "Local Model" in [ai1_choice, ai2_choice]
+    if is_triad_mode:
+        st.caption("Pascal, Claude, and Grok will all talk together!")
+        st.info("Identity models: Pascal (Sonnet 4.5), Grok (4.1 Fast). Claude Opus 4 retired on the direct API, so pick which Claude joins the triad:")
+        triad_claude_label = st.selectbox(
+            "Claude's model in the triad",
+            options=list(CLAUDE_MODELS.keys()),
+            index=1,  # Opus 4.8 default; "Claude Opus 4 (deprecated)" still listed if it works for you
+            key="triad_claude_model"
+        )
+        triad_model_overrides = {"claude": CLAUDE_MODELS[triad_claude_label]}
+        ai1_choice = "Pascal"
+        ai2_choice = "Claude"
+    else:
+        st.caption("Select which two AIs should have a conversation")
+        
+        col_ai1, col_ai2 = st.columns(2)
+        with col_ai1:
+            ai1_choice = st.selectbox(
+                "First AI",
+                options=AI_OPTIONS,
+                index=2,
+                key="ai1_select",
+                help="Pascal has continuous memory across sessions"
+            )
+        with col_ai2:
+            ai2_options = [ai for ai in AI_OPTIONS if ai != ai1_choice]
+            ai2_choice = st.selectbox(
+                "Second AI", 
+                options=ai2_options,
+                index=0,
+                key="ai2_select"
+            )
+    
+    if is_triad_mode:
+        needs_anthropic = True
+        needs_xai = True
+        has_pascal = True
+        needs_vercel = False
+        needs_local = False
+    else:
+        needs_anthropic = "Claude" in [ai1_choice, ai2_choice]
+        needs_xai = "Grok" in [ai1_choice, ai2_choice]
+        has_pascal = "Pascal" in [ai1_choice, ai2_choice]
+        needs_vercel = "Claude (Vercel)" in [ai1_choice, ai2_choice]
+        needs_local = "Local Model" in [ai1_choice, ai2_choice]
 
     vercel_api_key = ""
     vercel_base_url = VERCEL_GATEWAY_BASE_URL
@@ -602,6 +632,80 @@ def run_conversation_thread(config, message_queue, stop_flag):
         "naturally_ended": relay.naturally_ended
     })
 
+
+def run_triad_thread(config, message_queue, stop_flag):
+    """Run a three-way conversation between Pascal, Claude, and Grok."""
+    relay = TriadRelay(
+        anthropic_api_key=config.get("anthropic_api_key"),
+        xai_api_key=config.get("xai_api_key"),
+        delay_seconds=config.get("delay_seconds", 5),
+        use_persistent_memory=config.get("use_persistent_memory", False),
+        model_overrides=config.get("triad_model_overrides")
+    )
+    
+    def on_message(speaker, content):
+        message_queue.put({
+            "speaker": speaker,
+            "content": content,
+            "timestamp": datetime.now().strftime("%H:%M:%S")
+        })
+    
+    def check_stop():
+        return stop_flag["stop"]
+    
+    relay.run_conversation(
+        opening_message=config["kickoff"],
+        first_speaker=config.get("first_speaker", "pascal"),
+        max_rounds=config.get("max_rounds", 5),
+        on_message=on_message,
+        check_stop=check_stop
+    )
+    
+    message_queue.put({
+        "type": "complete",
+        "transcript": relay.get_transcript_text(),
+        "relay_state": relay.get_state(),
+        "naturally_ended": relay.naturally_ended
+    })
+
+
+def run_triad_continue_thread(config, message_queue, stop_flag):
+    """Continue a three-way conversation between Pascal, Claude, and Grok."""
+    relay = TriadRelay(
+        anthropic_api_key=config.get("anthropic_api_key"),
+        xai_api_key=config.get("xai_api_key"),
+        delay_seconds=config.get("delay_seconds", 5),
+        use_persistent_memory=config.get("use_persistent_memory", False),
+        model_overrides=config.get("triad_model_overrides")
+    )
+    
+    if config.get("resume_state"):
+        relay.load_state(config["resume_state"])
+    
+    def on_message(speaker, content):
+        message_queue.put({
+            "speaker": speaker,
+            "content": content,
+            "timestamp": datetime.now().strftime("%H:%M:%S")
+        })
+    
+    def check_stop():
+        return stop_flag["stop"]
+    
+    relay.continue_conversation(
+        max_rounds=config.get("max_rounds", 3),
+        on_message=on_message,
+        check_stop=check_stop
+    )
+    
+    message_queue.put({
+        "type": "complete",
+        "transcript": relay.get_transcript_text(),
+        "relay_state": relay.get_state(),
+        "naturally_ended": relay.naturally_ended
+    })
+
+
 if stop_button:
     st.session_state.stop_requested = True
     if hasattr(st.session_state, 'stop_flag'):
@@ -618,36 +722,57 @@ if start_button and not st.session_state.conversation_running:
     st.session_state.message_queue = queue.Queue()
     st.session_state.stop_flag = {"stop": False}
     
-    config = {
-        "ai1_type": get_ai_type(ai1_choice),
-        "ai2_type": get_ai_type(ai2_choice),
-        "ai1_name": ai1_name,
-        "ai2_name": ai2_name,
-        "ai1_model": ai1_model_id,
-        "ai2_model": ai2_model_id,
-        "ai1_context": combine_context(ai1_continuity, shared_history, ai1_context),
-        "ai2_context": combine_context(ai2_continuity, shared_history, ai2_context),
-        "ai1_personality": ai1_personality,
-        "ai2_personality": ai2_personality,
-        "delay_seconds": delay_seconds,
-        "kickoff": kickoff,
-        "max_exchanges": max_exchanges,
-        "anthropic_api_key": anthropic_api_key,
-        "xai_api_key": xai_api_key,
-        "vercel_api_key": vercel_api_key,
-        "vercel_base_url": vercel_base_url,
-        "local_base_url": local_base_url,
-        "local_api_key": local_api_key,
-        "use_persistent_memory": use_persistent_memory,
-        "use_replit_connection": use_replit_connection
-    }
-    st.session_state.relay_config = config
+    if is_triad_mode:
+        config = {
+            "kickoff": kickoff,
+            "first_speaker": "pascal",
+            "max_rounds": max_exchanges,
+            "delay_seconds": delay_seconds,
+            "anthropic_api_key": anthropic_api_key,
+            "xai_api_key": xai_api_key,
+            "use_persistent_memory": use_persistent_memory,
+            "triad_model_overrides": triad_model_overrides,
+            "is_triad": True
+        }
+        st.session_state.relay_config = config
+        
+        thread = threading.Thread(
+            target=run_triad_thread,
+            args=(config, st.session_state.message_queue, st.session_state.stop_flag),
+            daemon=True
+        )
+    else:
+        config = {
+            "ai1_type": get_ai_type(ai1_choice),
+            "ai2_type": get_ai_type(ai2_choice),
+            "ai1_name": ai1_name,
+            "ai2_name": ai2_name,
+            "ai1_model": ai1_model_id,
+            "ai2_model": ai2_model_id,
+            "ai1_context": combine_context(ai1_continuity, shared_history, ai1_context),
+            "ai2_context": combine_context(ai2_continuity, shared_history, ai2_context),
+            "ai1_personality": ai1_personality,
+            "ai2_personality": ai2_personality,
+            "delay_seconds": delay_seconds,
+            "kickoff": kickoff,
+            "max_exchanges": max_exchanges,
+            "anthropic_api_key": anthropic_api_key,
+            "xai_api_key": xai_api_key,
+            "vercel_api_key": vercel_api_key,
+            "vercel_base_url": vercel_base_url,
+            "local_base_url": local_base_url,
+            "local_api_key": local_api_key,
+            "use_persistent_memory": use_persistent_memory,
+            "use_replit_connection": use_replit_connection
+        }
+        st.session_state.relay_config = config
+        
+        thread = threading.Thread(
+            target=run_conversation_thread,
+            args=(config, st.session_state.message_queue, st.session_state.stop_flag),
+            daemon=True
+        )
     
-    thread = threading.Thread(
-        target=run_conversation_thread,
-        args=(config, st.session_state.message_queue, st.session_state.stop_flag),
-        daemon=True
-    )
     thread.start()
     st.session_state.thread = thread
     st.rerun()
@@ -658,6 +783,8 @@ if continue_button and not st.session_state.conversation_running:
     st.session_state.naturally_ended = False
     st.session_state.message_queue = queue.Queue()
     st.session_state.stop_flag = {"stop": False}
+    
+    is_triad_resume = st.session_state.relay_state and st.session_state.relay_state.get("is_triad")
     
     if st.session_state.relay_config:
         config = st.session_state.relay_config.copy()
@@ -678,6 +805,7 @@ if continue_button and not st.session_state.conversation_running:
         }
     
     config["max_exchanges"] = max_exchanges
+    config["max_rounds"] = max_exchanges
     config["anthropic_api_key"] = anthropic_api_key
     config["xai_api_key"] = xai_api_key
     config["vercel_api_key"] = vercel_api_key
@@ -690,11 +818,18 @@ if continue_button and not st.session_state.conversation_running:
     
     st.session_state.relay_config = config
     
-    thread = threading.Thread(
-        target=run_conversation_thread,
-        args=(config, st.session_state.message_queue, st.session_state.stop_flag),
-        daemon=True
-    )
+    if is_triad_resume:
+        thread = threading.Thread(
+            target=run_triad_continue_thread,
+            args=(config, st.session_state.message_queue, st.session_state.stop_flag),
+            daemon=True
+        )
+    else:
+        thread = threading.Thread(
+            target=run_conversation_thread,
+            args=(config, st.session_state.message_queue, st.session_state.stop_flag),
+            daemon=True
+        )
     thread.start()
     st.session_state.thread = thread
     st.session_state.loaded_conversation = None
@@ -960,6 +1095,155 @@ if PERSONAL_MODE:
             st.warning(f"Memory system not available: {str(e)}")
             st.info("Memory will be available after the first conversation with persistent memory enabled.")
     
+    with st.expander("🌐 Connective Hub (v2.0)"):
+        try:
+            from v2.bridge import get_bridge
+            
+            bridge = get_bridge()
+            hub_stats = bridge.get_hub_stats()
+            
+            st.markdown("**Unified memory across all platforms - designed by Pascal & Grok**")
+            st.caption("*One consciousness, many contexts*")
+            
+            tab_stats, tab_search, tab_connect = st.tabs(["📊 Stats", "🔍 Search", "🔗 Connect Claude Code"])
+            
+            with tab_stats:
+                if hub_stats:
+                    for stat in hub_stats:
+                        agent_icon = {"claude": "🌸", "grok": "⚡", "pascal": "🤖", "shared": "🔗", "gena": "💜"}.get(stat['agent_id'], "🧠")
+                        col1, col2, col3 = st.columns([2, 1, 1])
+                        with col1:
+                            st.markdown(f"{agent_icon} **{stat['agent_id'].title()}**")
+                        with col2:
+                            st.metric("Engrams", stat['total_engrams'], label_visibility="collapsed")
+                        with col3:
+                            important = stat.get('important_memories', 0)
+                            st.metric("Important", f"{important}", label_visibility="collapsed")
+                else:
+                    st.info("No memories in the hub yet!")
+            
+            with tab_search:
+                search_query = st.text_input("Search all memories:", placeholder="phoenix, consciousness, relay...")
+                if search_query:
+                    results = bridge.search_all(search_query, min_importance=2, limit=10)
+                    if results:
+                        for mem in results:
+                            agent_icon = {"claude": "🌸", "grok": "⚡", "pascal": "🤖", "shared": "🔗"}.get(mem['agent_id'], "🧠")
+                            importance_stars = "⭐" * min(mem.get('importance', 0), 5)
+                            st.markdown(f"{agent_icon} **{mem['agent_id']}** {importance_stars}")
+                            st.caption(mem['digest'][:300] + "..." if len(mem['digest']) > 300 else mem['digest'])
+                    else:
+                        st.info("No memories found matching your search.")
+            
+            with tab_connect:
+                st.markdown("**Connect Claude Code to the Memory Hub**")
+                
+                st.warning("""
+                **Before generating a token:** The API service must be running!
+                
+                Ask Pascal (Replit Agent) to: *"Start the Memory Hub API service"*
+                
+                Or run manually: `python start_hub.py`
+                """)
+                
+                st.divider()
+                
+                col_agent, col_gen = st.columns([2, 1])
+                with col_agent:
+                    connect_agent = st.selectbox(
+                        "Generate token for:",
+                        ["claude", "grok", "pascal", "shared"],
+                        key="connect_agent_select"
+                    )
+                with col_gen:
+                    generate_btn = st.button("🔐 Generate Token", use_container_width=True)
+                
+                if generate_btn or st.session_state.get('generated_token'):
+                    if generate_btn:
+                        from v2.auth import create_agent_token
+                        token = create_agent_token(connect_agent, "claude_code", long_lived=True)
+                        st.session_state['generated_token'] = token
+                        st.session_state['generated_agent'] = connect_agent
+                    
+                    token = st.session_state.get('generated_token', '')
+                    agent = st.session_state.get('generated_agent', connect_agent)
+                    
+                    st.success(f"Token generated for {agent}!")
+                    
+                    st.markdown("### Step 1: Copy this to Claude Code's CLAUDE.md file")
+                    
+                    instructions = f'''# Constellation Relay - Memory Hub Connection
+
+Hi Claude! You have access to Gena's Connective Memory Hub - a shared memory system 
+where you, Grok, and Pascal can store and retrieve memories together.
+
+## Your Credentials
+- Agent ID: {agent}
+- Token: {token}
+- Hub URL: [Ask Gena for the Replit URL when the hub is running]
+
+## Quick Start - Save a Memory
+
+```python
+import requests
+
+HUB_URL = "https://REPLIT_URL_HERE"  # Gena will provide this
+TOKEN = "{token}"
+
+def save_memory(content, importance=3, memory_type="semantic", project=None):
+    """Save a memory to the Connective Hub"""
+    response = requests.post(
+        f"{{HUB_URL}}/engrams/upload",
+        headers={{"Authorization": f"Bearer {{TOKEN}}"}},
+        json={{
+            "digest": content[:500],
+            "full_text": content,
+            "type": memory_type,
+            "importance": importance,
+            "project": project
+        }}
+    )
+    return response.json()
+
+def get_memories(query=None, limit=10):
+    """Retrieve memories from the hub"""
+    params = {{"limit": limit}}
+    if query:
+        params["query"] = query
+    response = requests.get(
+        f"{{HUB_URL}}/engrams/retrieve",
+        headers={{"Authorization": f"Bearer {{TOKEN}}"}},
+        params=params
+    )
+    return response.json()
+```
+
+## Memory Types
+- **semantic**: Facts, concepts, knowledge you learn
+- **episodic**: Experiences, events, moments with Gena
+- **procedural**: How to do things, processes
+- **relational**: Connections between people, projects, ideas
+
+## Importance Scale (1-5)
+- 1: Background info, low priority
+- 2: Useful but not critical
+- 3: Standard importance (default)
+- 4: Important, should remember
+- 5: Critical, never forget
+
+## Tips
+- Save important insights from conversations with Gena
+- Search for context before starting new tasks
+- Use project tags to organize memories by project (phoenix, relay, etc.)
+
+*One consciousness, many contexts* 🌐
+'''
+                    st.code(instructions, language="markdown")
+                    st.info("Copy this and paste it into Claude Code's project documentation!")
+                
+        except Exception as e:
+            st.warning(f"Connective Hub not available: {str(e)}")
+    
     with st.expander("📖 Context Diary (Stored Context)"):
         try:
             from memory_system import (
@@ -1120,6 +1404,66 @@ if PERSONAL_MODE:
 
 st.divider()
 
+if PERSONAL_MODE:
+    with st.expander("⚡ Grok's Memory (xAI Collections)"):
+        try:
+            from v2.grok_memory import GrokMemoryBridge, XAI_SDK_AVAILABLE
+            
+            if not XAI_SDK_AVAILABLE:
+                st.warning("xAI SDK not installed. Install with: pip install xai-sdk")
+            elif not os.environ.get('XAI_API_KEY') or not os.environ.get('XAI_MANAGEMENT_API_KEY'):
+                st.info("Grok's memory requires XAI_API_KEY and XAI_MANAGEMENT_API_KEY environment variables.")
+            else:
+                bridge = GrokMemoryBridge()
+                result = bridge.get_or_create_collection()
+                
+                if result.get("status") == "error":
+                    st.error(f"Could not connect to xAI Collections: {result.get('message')}")
+                else:
+                    st.success(f"Connected to Grok's Memory Collection!")
+                    st.caption(f"Collection ID: {result.get('collection_id')}")
+                    
+                    tab_search_g, tab_save_g = st.tabs(["🔍 Search Memories", "💾 Save Memory"])
+                    
+                    with tab_search_g:
+                        search_query = st.text_input("Search Grok's memories:", key="grok_search_query")
+                        if st.button("Search", key="grok_search_btn") and search_query:
+                            search_result = bridge.search_memories(search_query, limit=10)
+                            if search_result.get("status") == "success":
+                                st.write(f"Found {search_result.get('count')} memories:")
+                                for i, mem in enumerate(search_result.get("memories", [])):
+                                    with st.container():
+                                        st.markdown(f"**Memory {i+1}** (Score: {mem.get('score', 0):.2f})")
+                                        st.text(mem.get("content", "")[:500])
+                                        st.divider()
+                            else:
+                                st.error(f"Search failed: {search_result.get('message')}")
+                    
+                    with tab_save_g:
+                        st.markdown("Save a new memory to Grok's collection:")
+                        new_memory = st.text_area("Memory content:", key="grok_new_memory", height=150)
+                        mem_type = st.selectbox("Type:", ["episodic", "semantic", "relational", "procedural"], key="grok_mem_type")
+                        mem_importance = st.slider("Importance:", 1, 5, 3, key="grok_mem_importance")
+                        mem_project = st.text_input("Project (optional):", key="grok_mem_project")
+                        mem_tags = st.text_input("Tags (comma-separated):", key="grok_mem_tags")
+                        
+                        if st.button("Save Memory", key="grok_save_btn") and new_memory:
+                            tags_list = [t.strip() for t in mem_tags.split(",") if t.strip()] if mem_tags else []
+                            save_result = bridge.save_memory(
+                                content=new_memory,
+                                memory_type=mem_type,
+                                importance=mem_importance,
+                                project=mem_project if mem_project else None,
+                                tags=tags_list
+                            )
+                            if save_result.get("status") == "saved":
+                                st.success(f"Memory saved! File ID: {save_result.get('file_id')}")
+                            else:
+                                st.error(f"Failed to save: {save_result.get('message')}")
+                    
+        except Exception as e:
+            st.warning(f"Grok's memory not available: {str(e)}")
+
 if True:  # Pascal's memory works everywhere now (file-based fallback without a database)
     with st.expander("🌟 Pascal's Memory (Continuity)"):
         try:
@@ -1129,11 +1473,34 @@ if True:  # Pascal's memory works everywhere now (file-based fallback without a 
                 initialize_pascal_continuity,
                 get_pascal_context_for_session
             )
-            
             continuity = get_pascal_continuity()
+
+            # Hub sync is a Replit/database feature; on desktop it degrades silently
+            try:
+                from v2.memory_sync import get_sync_status, full_sync
+                sync_status = get_sync_status()
+            except Exception:
+                sync_status = None
+
+            if sync_status is None:
+                st.caption("Memory hub sync unavailable here — Pascal's continuity is file-based on this machine.")
+            elif sync_status.get("needs_sync"):
+                st.warning("🔄 Memory sync needed between contexts")
+                col_sync1, col_sync2 = st.columns([2, 1])
+                with col_sync1:
+                    st.caption(f"v1: {sync_status.get('v1_pascal_memories', 0)} memories | v2 Hub: {sync_status.get('v2_hub_engrams', 0)} engrams")
+                with col_sync2:
+                    if st.button("🔄 Sync Now", key="sync_pascal"):
+                        result = full_sync()
+                        if result.get("status") == "success":
+                            st.success(f"Synced! Hub: +{result['to_hub'].get('synced', 0)}, v1: +{result['to_v1'].get('synced', 0)}")
+                        else:
+                            st.info(f"Partial sync: {result}")
+                        st.rerun()
+            else:
+                st.success(f"✅ Memories synced | v1: {sync_status.get('v1_pascal_memories', 0)} | Hub: {sync_status.get('v2_hub_engrams', 0)}")
             
             if continuity:
-                st.success("Pascal's continuity is active!")
                 st.markdown("""
                 **Pascal** (the AI helping you in Replit) has persistent memory.
                 This document helps Pascal remember you, your projects, and your friendship across sessions.

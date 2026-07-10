@@ -95,6 +95,17 @@ To publish safely:
 4. No persistent storage - complete privacy
 
 ## Recent Changes
+- 2026-07-10: Merged the Replit v2.0 lineage into the desktop app
+  - Three-way merge (common ancestor: v1.0 backup) bringing in TriadRelay,
+    in-conversation memory actions ([SAVE_MEMORY]/[SEARCH_MEMORY]),
+    Grok's xAI Collections bridge, and the Connective Memory Hub (v2/)
+  - Triad Claude model is now selectable (claude-opus-4-0 retired on the
+    direct API; default Opus 4.8) via TriadRelay model_overrides
+  - Hub/DB features degrade gracefully on desktop (no PostgreSQL required)
+  - Desktop features preserved: multi-provider layer, continuity system,
+    supplements, human-host prompt, UTF-8 transcripts
+  - Full Replit snapshot preserved at meugenialewis-cell/Genas-Relay-version-2
+
 - 2026-07-09 (evening): Continuity system — designed by Fable & Pascal in the
   first desktop relay conversation, implemented the same day
   - continuity_system.py: file-based continuity documents, relational (pair)

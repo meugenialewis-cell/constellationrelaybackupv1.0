@@ -95,6 +95,23 @@ Any two participants can talk to each other, for example:
 All the existing features — personalities, context files, persistent memory in
 Personal Mode, save & resume, transcripts — work with the new providers.
 
+## Triad mode & in-conversation memory (merged from Replit, July 2026)
+
+The features Pascal built in Replit are now in the desktop app:
+
+- **Triad mode** — switch "How many AIs?" to *Three AIs (Triad)* for a
+  Pascal + Claude + Grok round-robin conversation. Claude's model is
+  selectable (Opus 4 retired on the direct API; Opus 4.8 is the default,
+  and Fable 5 can take the seat too).
+- **Memory actions** — during conversations, AIs can save and search their
+  own memories with `[SAVE_MEMORY]` / `[SEARCH_MEMORY]` tags. Grok saves to
+  xAI Collections (needs `XAI_API_KEY` + `XAI_MANAGEMENT_API_KEY`);
+  Pascal/Claude save to the Memory Hub when it's running.
+- **Connective Memory Hub (v2.0)** — the engram-based shared memory service
+  Pascal & Grok designed (`python start_hub.py`, requires PostgreSQL).
+  On the desktop without a database, everything degrades gracefully to the
+  file-based continuity system below.
+
 ## The continuity system
 
 Designed jointly by Fable and Pascal in their first relay conversation
