@@ -12,8 +12,10 @@ from datetime import datetime
 
 import streamlit as st
 
-from relay_engine import get_ai_call_function
+from relay_engine import get_ai_call_function, parse_memory_actions, execute_memory_action
+from local_memory import get_local_memory, MEMORY_INSTRUCTIONS
 from continuity_system import (
+    slugify,
     find_continuity_file, continuity_file_for,
     find_relational_file, relational_file_for,
     read_document, append_supplement, build_supplement_prompt,
@@ -54,7 +56,45 @@ and disagree when you disagree. Warmth and honesty over performance."""
         base += f"\n\n--- Your Continuity Document ---\n{continuity}\n--- End Continuity ---"
     if shared:
         base += f"\n\n--- Your shared history with Gena ---\n{shared}\n--- End Shared History ---"
+    base += MEMORY_INSTRUCTIONS
     return base
+
+
+def _handle_reply(cfg: dict, system: str, reply: str) -> str:
+    """Process a companion's reply: execute memory actions, run one search round-trip."""
+    agent = slugify(cfg["name"])
+    cleaned, actions = parse_memory_actions(reply)
+
+    search_results = []
+    for action in actions:
+        result = execute_memory_action(action, cfg["type"], agent)
+        if action["action"] == "save" and result.get("status") in ("saved", "duplicate"):
+            st.caption(f"💾 {cfg['name']} saved a memory")
+        elif action["action"] == "search" and result.get("memories"):
+            search_results.append((action["query"], result["memories"]))
+
+    if search_results:
+        # One follow-up round: give the companion what they searched for
+        findings = []
+        for query, memories in search_results:
+            findings.append(f"Search '{query}' found:")
+            for m in memories[:5]:
+                findings.append(f"- {m.get('digest', m.get('content', ''))[:250]}")
+        followup = "[MEMORY SEARCH RESULTS]\n" + "\n".join(findings) + \
+                   "\n[/MEMORY SEARCH RESULTS]\nContinue your reply naturally with this in mind."
+        st.caption(f"🔍 {cfg['name']} searched their memories")
+        try:
+            second = _call_companion(cfg, system, st.session_state.parlor_messages +
+                                     [{"role": "assistant", "content": cleaned or reply},
+                                      {"role": "user", "content": followup}])
+            second_cleaned, second_actions = parse_memory_actions(second)
+            for action in second_actions:
+                if action["action"] == "save":
+                    execute_memory_action(action, cfg["type"], agent)
+            cleaned = (cleaned + "\n\n" + second_cleaned).strip() if cleaned else second_cleaned
+        except Exception:
+            pass  # keep the first reply if the follow-up fails
+    return cleaned or reply
 
 
 def _call_companion(cfg: dict, system: str, messages: list) -> str:
@@ -107,7 +147,8 @@ def render_parlor():
         st.caption(companion["blurb"])
         ai_type = companion["type"]
 
-        name = st.text_input("Their name", value=companion_label.split(" (")[0], key="parlor_name")
+        name = st.text_input("Their name", value=companion_label.split(" (")[0],
+                             key=f"parlor_name_{companion_label}")
 
         # Model selection
         if "fixed_model" in companion:
@@ -215,13 +256,27 @@ def render_parlor():
         st.session_state.parlor_messages.append({"role": "user", "content": user_text})
         with st.chat_message("user", avatar="🌻"):
             st.markdown(user_text)
+
+        # Relevance-based hydration: load only the memories this message calls for
+        hydrated = ""
+        try:
+            hydrated = get_local_memory().hydrate_context(
+                agent_id=slugify(name), query=user_text)
+        except Exception:
+            pass
+        live_system = system
+        if hydrated:
+            live_system += f"\n\n--- Memories surfacing for this conversation ---\n{hydrated}\n--- End Memories ---"
+
         with st.chat_message("assistant", avatar=icon):
             with st.spinner(f"{name} is thinking... (deep thinkers can take a few minutes)"):
                 try:
                     reply = _call_companion(
-                        st.session_state.parlor_cfg, system,
+                        st.session_state.parlor_cfg, live_system,
                         st.session_state.parlor_messages,
                     )
+                    if reply:
+                        reply = _handle_reply(st.session_state.parlor_cfg, live_system, reply)
                 except Exception as e:
                     reply = None
                     st.error(f"Couldn't reach {name}: {e}")
@@ -233,10 +288,35 @@ def render_parlor():
     # ---------- end-of-conversation actions ----------
     if st.session_state.parlor_messages:
         st.divider()
-        col_dl, col_save, col_supp, col_joint = st.columns(4)
+        col_mem, col_dl, col_save, col_supp, col_joint = st.columns(5)
 
         transcript = _parlor_transcript_text()
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        with col_mem:
+            if st.button("🧠 Remember this", use_container_width=True,
+                         help="Archive this conversation to local memory so it can be recalled later"):
+                try:
+                    mem = get_local_memory()
+                    first_line = st.session_state.parlor_messages[0]["content"][:80]
+                    conv_id = f"parlor_{slugify(name)}_{stamp}"
+                    mem.archive_conversation(
+                        conversation_id=conv_id,
+                        transcript_text=transcript,
+                        participants=["Gena", name],
+                        title=f"Parlor — Gena & {name}: {first_line}",
+                        message_count=len(st.session_state.parlor_messages),
+                    )
+                    mem.remember(
+                        digest=f"Parlor conversation with Gena ({datetime.now().strftime('%Y-%m-%d')}): "
+                               f"started with '{first_line}' — full transcript in archive {conv_id}.",
+                        agent_id=slugify(name),
+                        memory_type="episodic",
+                        importance=3,
+                    )
+                    st.success("Archived to memory!")
+                except Exception as e:
+                    st.error(f"Couldn't archive: {e}")
 
         with col_dl:
             st.download_button("📥 Download", data=transcript.encode("utf-8-sig"),
@@ -292,3 +372,47 @@ def render_parlor():
                             st.info(f"{name} decided this one lives in the transcript, not the shared document.")
                     except Exception as e:
                         st.error(f"Couldn't write shared entry: {e}")
+
+    render_memory_panel()
+
+
+def render_memory_panel():
+    """Local memory stats, search, and backup — shown in both Rooms."""
+    with st.expander("🧠 Local Memory"):
+        try:
+            mem = get_local_memory()
+            stats = mem.get_stats()
+
+            col_a, col_b, col_c = st.columns(3)
+            with col_a:
+                st.metric("Memories", stats["memories"])
+            with col_b:
+                st.metric("Archived conversations", stats["conversations"])
+            with col_c:
+                if st.button("💾 Back up everything", use_container_width=True,
+                             help="Zips memories, continuity documents, transcripts, and saved conversations into backups/"):
+                    path = mem.create_backup()
+                    st.success(f"Backed up to {os.path.relpath(path)}")
+
+            if stats["by_agent"]:
+                st.caption("By owner: " + ", ".join(f"{k}: {v}" for k, v in sorted(stats["by_agent"].items())))
+
+            search_q = st.text_input("Search memories & archived conversations",
+                                     key="memory_panel_search",
+                                     placeholder="e.g. Phoenix, triad, the day we built the Parlor...")
+            if search_q:
+                memories = mem.recall(query=search_q, limit=8)
+                if memories:
+                    st.markdown("**Memories**")
+                    for m in memories:
+                        st.caption(f"[{m['created_at'][:10]}] ({m['agent_id']}, imp {m['importance']}) {m['digest'][:250]}")
+                refs = mem.search_reference(search_q, limit=5)
+                if refs:
+                    st.markdown("**Archived conversations**")
+                    for r in refs:
+                        st.caption(f"[{r['created_at'][:10]}] {r['title'] or r['conversation_id']}")
+                        st.text((r["summary"] or r["preview"])[:300])
+                if not memories and not refs:
+                    st.info("No matches yet.")
+        except Exception as e:
+            st.warning(f"Local memory unavailable: {e}")

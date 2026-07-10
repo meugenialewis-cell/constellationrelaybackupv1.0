@@ -1541,6 +1541,9 @@ if True:  # Pascal's memory works everywhere now (file-based fallback without a 
         except Exception as e:
             st.warning(f"Pascal's memory not available: {str(e)}")
 
+from parlor import render_memory_panel
+render_memory_panel()
+
 with st.expander("📖 Fable's Space"):
     try:
         from continuity_system import write_document

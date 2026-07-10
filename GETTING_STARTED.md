@@ -95,6 +95,35 @@ Any two participants can talk to each other, for example:
 All the existing features — personalities, context files, persistent memory in
 Personal Mode, save & resume, transcripts — work with the new providers.
 
+## The Memory Bridge (ported from Project Phoenix, July 2026)
+
+The Relay now has local, relevance-based memory — no database server needed.
+Everything lives in `relay_memory.db` (one SQLite file) beside the app.
+
+- **Relevance-based recall** — when you talk to a companion in the Parlor,
+  only memories relevant to what you just said are loaded into their context
+  (Gena's lunch-with-a-friend model, via Phoenix's `hydrate_context`).
+- **AIs remember for themselves** — companions can use `[SAVE_MEMORY]` and
+  `[SEARCH_MEMORY]` during any conversation. Saves go to local memory (or the
+  Memory Hub when it's running; Grok uses xAI Collections when configured).
+- **🧠 Remember this** — archives a Parlor conversation so it can be found
+  and recalled later. Relay conversations archive automatically.
+- **🧠 Local Memory panel** (both Rooms) — stats, search, and the
+  **💾 Back up everything** button, which zips memories + continuity
+  documents + transcripts + saved conversations into `backups/`. Copy that
+  file anywhere you trust. The whole memory system also travels if you copy
+  the app folder to a new computer.
+
+## Updating the app
+
+Double-click **`Update & Launch Constellation Relay.command`** — it fetches
+the latest version from GitHub, updates the code *without touching your
+personal data* (continuity documents, transcripts, memory database, backups
+are never overwritten), then launches the app. Make an alias of it on your
+Desktop (right-click → Make Alias, drag to Desktop) for a one-click
+update-and-open button. The plain `Constellation Relay.command` still
+launches without updating.
+
 ## The Parlor — talk one-on-one (July 2026)
 
 Switch the **Room** selector at the top of the sidebar to **🛋️ Parlor** to

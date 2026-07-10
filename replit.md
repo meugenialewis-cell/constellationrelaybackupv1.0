@@ -95,6 +95,20 @@ To publish safely:
 4. No persistent storage - complete privacy
 
 ## Recent Changes
+- 2026-07-10: The Memory Bridge (ported from Project Phoenix) + update button
+  - local_memory.py: SQLite engrams + conversation archive + relevance-based
+    hydrate_context (important + recent + relevant, size-capped)
+  - Parlor: memories hydrate per-message; [SAVE_MEMORY]/[SEARCH_MEMORY] work
+    with a one-round search follow-up; "🧠 Remember this" archives the chat
+  - Relay & Triad conversations archive to local memory automatically
+  - execute_memory_action falls back Hub → local memory
+  - 🧠 Local Memory panel (both Rooms): stats, search, "Back up everything"
+    (zips memory db + continuity + transcripts + saved conversations)
+  - "Update & Launch" command: pulls the latest version from GitHub without
+    touching personal data, then starts the app
+  - Verified end-to-end: a memory saved in one Parlor conversation was
+    recalled in a fresh conversation
+
 - 2026-07-10: The Parlor — one-on-one conversations with Gena
   - New Room selector: Relay (AI↔AI) or Parlor (human↔AI)
   - Companions: Fable, Pascal, Claude (Opus 3 through 4.8 — Opus 3 via

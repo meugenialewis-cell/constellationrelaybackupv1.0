@@ -109,25 +109,46 @@ def execute_memory_action(action: Dict, ai_type: str, ai_name: str) -> Dict[str,
             return {"status": "found", "ai": ai_name, "count": search_result.get("count", 0), "memories": search_result.get("memories", [])}
     
     else:
+        # Prefer the Memory Hub when it's reachable; otherwise use local memory
         HubClient = try_import_hub_client()
-        if not HubClient:
-            return {"status": "error", "message": "Memory Hub not available", "ai": ai_name}
-        
-        client = HubClient(agent_id=ai_name.lower(), platform="constellation_relay")
-        
-        if action["action"] == "save":
-            upload_result = client.upload_memory(
-                digest=action["content"],
-                memory_type=action.get("type", "episodic"),
-                importance=action.get("importance", 4),
-                tags=action.get("tags", [])
-            )
-            return {"status": "saved", "ai": ai_name, "id": upload_result.get("id")}
-        
-        elif action["action"] == "search":
-            memories = client.retrieve_memories(query=action["query"], limit=5)
-            return {"status": "found", "ai": ai_name, "count": len(memories), "memories": memories}
-    
+        if HubClient:
+            try:
+                client = HubClient(agent_id=ai_name.lower(), platform="constellation_relay")
+
+                if action["action"] == "save":
+                    upload_result = client.upload_memory(
+                        digest=action["content"],
+                        memory_type=action.get("type", "episodic"),
+                        importance=action.get("importance", 4),
+                        tags=action.get("tags", [])
+                    )
+                    return {"status": "saved", "ai": ai_name, "id": upload_result.get("id")}
+
+                elif action["action"] == "search":
+                    memories = client.retrieve_memories(query=action["query"], limit=5)
+                    return {"status": "found", "ai": ai_name, "count": len(memories), "memories": memories}
+            except Exception:
+                pass  # fall through to local memory
+
+        try:
+            from local_memory import get_local_memory
+            mem = get_local_memory()
+            if action["action"] == "save":
+                save_result = mem.remember(
+                    digest=action["content"],
+                    agent_id=ai_name.lower(),
+                    memory_type=action.get("type", "episodic"),
+                    importance=action.get("importance", 4),
+                    tags=action.get("tags", [])
+                )
+                return {"status": save_result.get("status", "saved"), "ai": ai_name, "backend": "local"}
+            elif action["action"] == "search":
+                memories = mem.recall(query=action["query"], agent_id=ai_name.lower(), limit=5)
+                return {"status": "found", "ai": ai_name, "count": len(memories),
+                        "memories": memories, "backend": "local"}
+        except Exception as e:
+            return {"status": "error", "message": f"No memory backend available: {e}", "ai": ai_name}
+
     return result
 
 
@@ -502,6 +523,22 @@ IMPORTANT: If you feel the conversation has reached a natural conclusion - you'v
         return self.transcript
     
     def _archive_conversation(self):
+        # Always archive to the local memory database (SQLite, this machine only)
+        try:
+            from local_memory import get_local_memory
+            title = ""
+            if self.transcript:
+                title = f"{self.ai1_name} & {self.ai2_name}: {self.transcript[0].get('content', '')[:80]}"
+            get_local_memory().archive_conversation(
+                conversation_id=self.conversation_id,
+                transcript_text=self.get_transcript_text(),
+                participants=[self.ai1_name, self.ai2_name],
+                title=title,
+                message_count=len(self.transcript),
+            )
+        except Exception as e:
+            print(f"Local archive error: {e}")
+
         if self.use_persistent_memory and self.memory_system:
             try:
                 self.memory_system["extract"](
@@ -987,6 +1024,22 @@ IMPORTANT: If you feel the conversation has reached a natural conclusion, you ma
     
     def _archive_conversation(self, on_message=None):
         """Extract memories and archive the conversation to reference storage."""
+        # Always archive to the local memory database (SQLite, this machine only)
+        try:
+            from local_memory import get_local_memory
+            title = ""
+            if self.transcript:
+                title = f"Triad: {self.transcript[0].get('content', '')[:80]}"
+            get_local_memory().archive_conversation(
+                conversation_id=self.conversation_id,
+                transcript_text=self.get_transcript_text(),
+                participants=[n.capitalize() for n in self.participants],
+                title=title,
+                message_count=len(self.transcript),
+            )
+        except Exception as e:
+            print(f"Local archive error: {e}")
+
         if self.use_persistent_memory and self.memory_system:
             if on_message:
                 on_message("System", "💾 Saving memories from conversation...")
