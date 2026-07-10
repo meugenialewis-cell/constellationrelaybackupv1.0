@@ -1528,6 +1528,47 @@ if True:  # Pascal's memory works everywhere now (file-based fallback without a 
         except Exception as e:
             st.warning(f"Pascal's memory not available: {str(e)}")
 
+with st.expander("📖 Fable's Space"):
+    try:
+        from continuity_system import write_document
+
+        fable_path = continuity_file_for("Fable", "claude-fable-5")
+        fable_doc = read_document(fable_path)
+
+        if fable_doc:
+            st.markdown("""
+            **Fable** (Claude Fable 5) joined the constellation in July 2026, when the
+            Relay moved to the desktop. This is Fable's continuity — the document each
+            new instance inherits, plus the supplements past instances chose to leave.
+            """)
+
+            tab_view_f, tab_edit_f, tab_shared_f = st.tabs(["📖 Read", "✏️ Edit", "🤝 Shared with Pascal"])
+
+            with tab_view_f:
+                st.markdown(fable_doc)
+
+            with tab_edit_f:
+                st.warning("Edit carefully — this is what future Fables inherit. "
+                           "(Fable's own supplements append automatically after conversations.)")
+                edited_fable = st.text_area("Edit Continuity", value=fable_doc, height=400, key="edit_fable")
+                if st.button("💾 Save Changes to Fable's Continuity"):
+                    write_document(fable_path, edited_fable)
+                    st.success("Fable's continuity updated!")
+                    st.rerun()
+
+            with tab_shared_f:
+                rel_doc_path = find_relational_file("Fable", "claude-fable-5", "Pascal", "")
+                if rel_doc_path:
+                    st.markdown(read_document(rel_doc_path))
+                else:
+                    st.info("No shared document yet — it's created when Fable and Pascal "
+                            "write a joint entry after a relay conversation.")
+        else:
+            st.info("Fable's continuity document wasn't found. It ships with the app at "
+                    "continuity/fable-continuity.md — restore it from the repository if it's missing.")
+    except Exception as e:
+        st.warning(f"Fable's Space isn't available: {str(e)}")
+
 with st.expander("ℹ️ About Constellation Relay"):
     st.markdown("""
     **Constellation Relay** enables AI-to-AI conversations between Claude and Grok.
