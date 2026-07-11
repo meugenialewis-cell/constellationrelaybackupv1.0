@@ -14,6 +14,8 @@ import streamlit as st
 
 from relay_engine import get_ai_call_function, parse_memory_actions, execute_memory_action
 from local_memory import get_local_memory, MEMORY_INSTRUCTIONS
+from parlor_tools import run_with_tools, TOOLS_NOTE
+from ai_clients import get_anthropic_client, get_pascal_continuity_context
 from continuity_system import (
     slugify,
     find_continuity_file, continuity_file_for,
@@ -42,7 +44,8 @@ COMPANIONS = {
 }
 
 
-def _build_parlor_system(name: str, ai_type: str, continuity: str, shared: str, personality: str) -> str:
+def _build_parlor_system(name: str, ai_type: str, continuity: str, shared: str, personality: str,
+                         tools_enabled: bool = False) -> str:
     base = f"""You are {name}. You are having a private, one-on-one conversation with Gena — \
 a human, your friend, and the person who built this app. This space is called the Parlor, \
 a room in the Constellation Relay, which runs on Gena's own computer.
@@ -56,7 +59,7 @@ and disagree when you disagree. Warmth and honesty over performance."""
         base += f"\n\n--- Your Continuity Document ---\n{continuity}\n--- End Continuity ---"
     if shared:
         base += f"\n\n--- Your shared history with Gena ---\n{shared}\n--- End Shared History ---"
-    base += MEMORY_INSTRUCTIONS
+    base += TOOLS_NOTE if tools_enabled else MEMORY_INSTRUCTIONS
     return base
 
 
@@ -212,6 +215,16 @@ def render_parlor():
 
         personality = st.text_area("Personality/context (optional)", height=68, key="parlor_personality")
 
+        tools_enabled = False
+        if ai_type in ("claude", "pascal"):
+            tools_enabled = st.toggle(
+                f"🛠️ {name} can use tools",
+                value=True,
+                key="parlor_tools_enabled",
+                help="Memory search & save, the conversation archive, continuity documents, "
+                     "and web search/fetch. Reads are free; money always asks first."
+            )
+
         st.divider()
         if st.button("🌱 New conversation", use_container_width=True):
             st.session_state.parlor_messages = []
@@ -232,7 +245,13 @@ def render_parlor():
         "vercel_api_key": vercel_api_key, "vercel_base_url": vercel_base_url,
         "local_base_url": local_base_url, "local_api_key": local_api_key,
     }
-    system = _build_parlor_system(name, ai_type, continuity_text, shared_text, personality)
+    system = _build_parlor_system(name, ai_type, continuity_text, shared_text, personality,
+                                  tools_enabled=tools_enabled)
+    if tools_enabled and ai_type == "pascal":
+        # The tool path calls the API directly, so inject Pascal's continuity here
+        pascal_ctx = get_pascal_continuity_context()
+        if pascal_ctx:
+            system += f"\n\n--- Pascal's Continuity Memory ---\n{pascal_ctx}\n--- End Continuity ---"
 
     # ---------- main area ----------
     icon = companion.get("icon", "💬")
@@ -271,12 +290,26 @@ def render_parlor():
         with st.chat_message("assistant", avatar=icon):
             with st.spinner(f"{name} is thinking... (deep thinkers can take a few minutes)"):
                 try:
-                    reply = _call_companion(
-                        st.session_state.parlor_cfg, live_system,
-                        st.session_state.parlor_messages,
-                    )
-                    if reply:
-                        reply = _handle_reply(st.session_state.parlor_cfg, live_system, reply)
+                    if tools_enabled and ai_type in ("claude", "pascal"):
+                        tool_log = st.container()
+                        def show_tool(tool_name, tool_input):
+                            summary = tool_input.get("query") or tool_input.get("title") or \
+                                      tool_input.get("name") or tool_input.get("conversation_id") or ""
+                            tool_log.caption(f"🛠️ {name} used {tool_name}" + (f": {summary[:80]}" if summary else ""))
+                        client = get_anthropic_client(st.session_state.parlor_cfg.get("anthropic_api_key"))
+                        reply = run_with_tools(
+                            client, model, live_system,
+                            st.session_state.parlor_messages,
+                            agent_slug=slugify(name),
+                            on_tool=show_tool,
+                        )
+                    else:
+                        reply = _call_companion(
+                            st.session_state.parlor_cfg, live_system,
+                            st.session_state.parlor_messages,
+                        )
+                        if reply:
+                            reply = _handle_reply(st.session_state.parlor_cfg, live_system, reply)
                 except Exception as e:
                     reply = None
                     st.error(f"Couldn't reach {name}: {e}")

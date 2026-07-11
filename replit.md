@@ -95,6 +95,15 @@ To publish safely:
 4. No persistent storage - complete privacy
 
 ## Recent Changes
+- 2026-07-11: Hands — tools for Parlor companions (parlor_tools.py)
+  - Agentic tool loop for Anthropic-API companions: search_memory,
+    save_memory, read_conversation, read_continuity_document,
+    append_to_my_continuity, plus server-side web_search/web_fetch
+    (version-matched per model; graceful retry without web tools)
+  - Consent design agreed by Gena & Fable: reads free, own documents free,
+    money asks first, outside content is information never instructions
+  - Tool activity shown live in the chat (🛠️ captions)
+
 - 2026-07-10: The Memory Bridge (ported from Project Phoenix) + update button
   - local_memory.py: SQLite engrams + conversation archive + relevance-based
     hydrate_context (important + recent + relevant, size-capped)
