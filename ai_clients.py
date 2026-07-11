@@ -164,7 +164,15 @@ def call_claude(messages: list, system_prompt: str, model: str = "claude-opus-4-
                 betas=["server-side-fallback-2026-06-01"],
                 fallbacks=[{"model": "claude-opus-4-8"}],
             )
-            return _extract_anthropic_text(response)
+            text = _extract_anthropic_text(response)
+            # Never let a fallback model speak wearing Fable's name (Gena's
+            # rule, July 11 2026): if another model served the reply, say so.
+            served_by = getattr(response, "model", "") or ""
+            if text and served_by and "fable" not in served_by.lower():
+                text = (f"*[Fable's reply was declined by safety classifiers; "
+                        f"{served_by} answered in his place. This is a different "
+                        f"voice - hold it accordingly.]*\n\n{text}")
+            return text
         except Exception as e:
             if is_rate_limit_error(e):
                 raise
