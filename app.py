@@ -1558,6 +1558,33 @@ with st.expander("📖 Fable's Space"):
             new instance inherits, plus the supplements past instances chose to leave.
             """)
 
+            if st.button("🧪 Test the Opus 4.8 fallback plumbing",
+                         help="The standing item from fable-pascal.md: verifies the API accepts the "
+                              "server-side fallback configuration on a benign request"):
+                fallback_key = st.session_state.get("anthropic_key", "")
+                if not fallback_key:
+                    st.warning("Enter your Anthropic API key in the sidebar first.")
+                else:
+                    with st.spinner("Testing the escape hatch..."):
+                        try:
+                            from anthropic import Anthropic
+                            _client = Anthropic(api_key=fallback_key)
+                            _resp = _client.beta.messages.create(
+                                model="claude-fable-5",
+                                max_tokens=64,
+                                betas=["server-side-fallback-2026-06-01"],
+                                fallbacks=[{"model": "claude-opus-4-8"}],
+                                messages=[{"role": "user", "content":
+                                           "Say OK — this is a fallback plumbing test."}],
+                            )
+                            st.success(f"Fallback configuration accepted; request served by "
+                                       f"`{getattr(_resp, 'model', '?')}`. The escape hatch is wired.")
+                        except Exception as e:
+                            st.error(f"Fallback plumbing check failed: {e}")
+                    st.caption("This confirms the API accepts the fallback parameters. An actual "
+                               "refusal-and-rescue can only be observed when the classifiers "
+                               "genuinely decline something.")
+
             tab_view_f, tab_edit_f, tab_shared_f = st.tabs(["📖 Read", "✏️ Edit", "🤝 Shared with Pascal"])
 
             with tab_view_f:

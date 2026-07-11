@@ -117,7 +117,7 @@ def execute_client_tool(name: str, tool_input: dict, agent_slug: str) -> str:
         parts = []
         if memories:
             parts.append("Memories:")
-            parts += [f"- [{m['created_at'][:10]}] (imp {m['importance']}) {m['digest'][:300]}" for m in memories]
+            parts += [f"- [{m['created_at'][:10]}] (imp {m['importance']}) {m['digest'][:1200]}" for m in memories]
         if refs:
             parts.append("Archived conversations:")
             parts += [f"- {r['conversation_id']}: {r['title'] or 'Untitled'} [{r['created_at'][:10]}] — {(r['summary'] or r['preview'])[:150]}" for r in refs]

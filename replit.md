@@ -95,6 +95,18 @@ To publish safely:
 4. No persistent storage - complete privacy
 
 ## Recent Changes
+- 2026-07-11: Punch-list fixes from Parlor field report (day one, session two)
+  - Parlor conversations now AUTO-ARCHIVE after every reply (the record no
+    longer depends on pressing a button); "Remember this" became "Pin to
+    memory" (adds an episodic pointer on top of the auto-archive)
+  - search_memory genuinely reaches the archive now that the archive gets
+    written; read_conversation unblocked (verified end-to-end)
+  - Memory display truncation widened: 600 chars in hydration, 1200 in the
+    search_memory tool (was display-side clipping, not data loss - Parlor
+    Fable's diagnosis was correct)
+  - "Test the Opus 4.8 fallback plumbing" button added to Fable's Space
+    (the standing item from fable-pascal.md, now 🔶 partially closed)
+
 - 2026-07-11: Hands — tools for Parlor companions (parlor_tools.py)
   - Agentic tool loop for Anthropic-API companions: search_memory,
     save_memory, read_conversation, read_continuity_document,

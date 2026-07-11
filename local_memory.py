@@ -149,14 +149,14 @@ class LocalMemory:
             parts.append("## Memories that matter")
             for m in important:
                 seen.add(m["digest"][:60])
-                parts.append(f"- [{m['created_at'][:10]}] {m['digest'][:300]}")
+                parts.append(f"- [{m['created_at'][:10]}] {m['digest'][:600]}")
 
         recent = self.recall(agent_id=agent_id, min_importance=2, limit=memory_limit)
         recent_unique = [m for m in recent if m["digest"][:60] not in seen][: max(2, memory_limit // 2)]
         if recent_unique:
             parts.append("\n## Recent memories")
             for m in recent_unique:
-                parts.append(f"- [{m['created_at'][:10]}] {m['digest'][:300]}")
+                parts.append(f"- [{m['created_at'][:10]}] {m['digest'][:600]}")
 
         if query:
             refs = self.search_reference(query, limit=reference_limit)

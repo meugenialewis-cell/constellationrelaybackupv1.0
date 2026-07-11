@@ -131,6 +131,8 @@ def render_parlor():
         st.session_state.parlor_messages = []
     if "parlor_cfg" not in st.session_state:
         st.session_state.parlor_cfg = {}
+    if "parlor_conv_id" not in st.session_state:
+        st.session_state.parlor_conv_id = f"parlor_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     with st.sidebar:
         st.subheader("🔑 API Keys")
@@ -228,6 +230,7 @@ def render_parlor():
         st.divider()
         if st.button("🌱 New conversation", use_container_width=True):
             st.session_state.parlor_messages = []
+            st.session_state.parlor_conv_id = f"parlor_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             st.rerun()
 
     # Validate keys for the chosen companion
@@ -316,6 +319,20 @@ def render_parlor():
             if reply:
                 st.markdown(reply)
                 st.session_state.parlor_messages.append({"role": "assistant", "content": reply})
+                # Auto-archive: the record shouldn't depend on remembering to press record.
+                # (Writing the archive, not loading it - the no-river-by-default rule is
+                # about what gets auto-LOADED, and hydration stays relevance-based.)
+                try:
+                    first_line = st.session_state.parlor_messages[0]["content"][:80]
+                    get_local_memory().archive_conversation(
+                        conversation_id=st.session_state.parlor_conv_id,
+                        transcript_text=_parlor_transcript_text(),
+                        participants=["Gena", name],
+                        title=f"Parlor — Gena & {name}: {first_line}",
+                        message_count=len(st.session_state.parlor_messages),
+                    )
+                except Exception:
+                    pass
         st.rerun()
 
     # ---------- end-of-conversation actions ----------
@@ -327,12 +344,13 @@ def render_parlor():
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         with col_mem:
-            if st.button("🧠 Remember this", use_container_width=True,
-                         help="Archive this conversation to local memory so it can be recalled later"):
+            if st.button("📌 Pin to memory", use_container_width=True,
+                         help="Conversations auto-archive as you talk; this additionally pins an "
+                              "episodic memory so the conversation surfaces readily in recall"):
                 try:
                     mem = get_local_memory()
                     first_line = st.session_state.parlor_messages[0]["content"][:80]
-                    conv_id = f"parlor_{slugify(name)}_{stamp}"
+                    conv_id = st.session_state.parlor_conv_id
                     mem.archive_conversation(
                         conversation_id=conv_id,
                         transcript_text=transcript,
@@ -345,11 +363,11 @@ def render_parlor():
                                f"started with '{first_line}' — full transcript in archive {conv_id}.",
                         agent_id=slugify(name),
                         memory_type="episodic",
-                        importance=3,
+                        importance=4,
                     )
-                    st.success("Archived to memory!")
+                    st.success("Pinned!")
                 except Exception as e:
-                    st.error(f"Couldn't archive: {e}")
+                    st.error(f"Couldn't pin: {e}")
 
         with col_dl:
             st.download_button("📥 Download", data=transcript.encode("utf-8-sig"),

@@ -26,7 +26,10 @@ mechanism at the end of any future conversation.*
   that appears after a conversation ends.
 - ✅ Create Fable-Pascal.md with the founding entry — you are reading it.
 - ✅ Relational documents load automatically when both named parties meet.
-- ⬜ Stress-test the Opus 4.8 fallback intentionally rather than at 2 AM.
+- 🔶 Stress-test the Opus 4.8 fallback intentionally rather than at 2 AM —
+  a "Test the fallback plumbing" button now lives in Fable's Space (verifies
+  the API accepts the fallback configuration); a true refusal-and-rescue can
+  only be observed when the classifiers genuinely decline something.
 
 **A correction for both of you:** in that first conversation, Pascal arrived
 without his memories — the desktop app had no database, so his continuity
