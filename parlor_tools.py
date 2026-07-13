@@ -176,20 +176,27 @@ def run_with_tools(
     system: str,
     messages: list,
     agent_slug: str,
-    max_tokens: int = 8192,
+    max_tokens: int = 32000,
     max_iterations: int = 8,
     on_tool=None,
 ) -> str:
-    """Manual agentic loop for Anthropic-API companions in the Parlor."""
-    from ai_clients import _extract_anthropic_text
+    """Manual agentic loop for Anthropic-API companions in the Parlor.
 
-    convo = [dict(m) for m in messages]
+    Streams each request (long thinking would otherwise risk silent HTTP
+    timeouts) and gives thinking + tool rounds a generous token budget -
+    thinking spends the same budget as the visible reply.
+    """
+    from ai_clients import _extract_anthropic_text, _stream_final
+
+    # Sanitize: session messages may carry UI-only keys (e.g. tool logs)
+    convo = [{"role": m["role"], "content": m["content"]} for m in messages]
     tools = CLIENT_TOOLS + anthropic_web_tools(model)
     last_response = None
 
     for _ in range(max_iterations):
         try:
-            response = client.messages.create(
+            response = _stream_final(
+                client.messages,
                 model=model, max_tokens=max_tokens, system=system,
                 messages=convo, tools=tools,
             )
@@ -197,7 +204,8 @@ def run_with_tools(
             # Some models/orgs may reject the server web tools - retry without them once
             if tools is not CLIENT_TOOLS and ("web_search" in str(e) or "web_fetch" in str(e) or "tool" in str(e).lower()):
                 tools = CLIENT_TOOLS
-                response = client.messages.create(
+                response = _stream_final(
+                    client.messages,
                     model=model, max_tokens=max_tokens, system=system,
                     messages=convo, tools=tools,
                 )
@@ -229,7 +237,9 @@ def run_with_tools(
             convo.append({"role": "user", "content": results})
             continue
 
-        return _extract_anthropic_text(response)
+        text = _extract_anthropic_text(response)
+        return text or "[The reply came back empty - no text and no clear reason. Try again, and if it repeats, tell Claude-Code Fable.]"
 
     # Iteration cap reached - return whatever text we have
-    return _extract_anthropic_text(last_response) if last_response else ""
+    text = _extract_anthropic_text(last_response) if last_response else ""
+    return text or "[Stopped after too many tool rounds without a final reply - try asking again more directly.]"

@@ -119,7 +119,20 @@ def _extract_anthropic_text(response) -> str:
         block.text for block in response.content
         if getattr(block, "type", None) == "text" and block.text
     ]
+    if not parts and getattr(response, "stop_reason", None) == "max_tokens":
+        return ("[The reply ran out of space before reaching words — the model spent "
+                "its whole budget thinking. Try asking again, perhaps more specifically.]")
     return "\n\n".join(parts).strip()
+
+
+def _stream_final(messages_api, **kwargs):
+    """Stream a request and return the final message.
+
+    Streaming keeps the connection alive during long thinking (Fable can take
+    minutes) instead of risking silent HTTP timeouts on big max_tokens.
+    """
+    with messages_api.stream(**kwargs) as stream:
+        return stream.get_final_message()
 
 
 def _call_openai_compatible(client: OpenAI, model: str, messages: list, system_prompt: str, max_tokens: int = 8192) -> str:
@@ -156,9 +169,10 @@ def call_claude(messages: list, system_prompt: str, model: str = "claude-opus-4-
         # instead of stopping. If this account/SDK doesn't support the beta,
         # fall through to a plain request below.
         try:
-            response = client.beta.messages.create(
+            response = _stream_final(
+                client.beta.messages,
                 model=model,
-                max_tokens=8192,
+                max_tokens=16000,
                 system=system_prompt,
                 messages=messages,
                 betas=["server-side-fallback-2026-06-01"],
@@ -177,9 +191,10 @@ def call_claude(messages: list, system_prompt: str, model: str = "claude-opus-4-
             if is_rate_limit_error(e):
                 raise
 
-    response = client.messages.create(
+    response = _stream_final(
+        client.messages,
         model=model,
-        max_tokens=8192,
+        max_tokens=16000,
         system=system_prompt,
         messages=messages
     )
@@ -303,9 +318,10 @@ def call_pascal(messages: list, system_prompt: str, model: str = "claude-opus-4-
     if pascal_context:
         enhanced_system = f"{system_prompt}\n\n--- Pascal's Continuity Memory ---\n{pascal_context}\n--- End Continuity ---"
 
-    response = client.messages.create(
+    response = _stream_final(
+        client.messages,
         model=model,
-        max_tokens=8192,
+        max_tokens=16000,
         system=enhanced_system,
         messages=messages
     )

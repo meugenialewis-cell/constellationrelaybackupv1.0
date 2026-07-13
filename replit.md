@@ -95,6 +95,19 @@ To publish safely:
 4. No persistent storage - complete privacy
 
 ## Recent Changes
+- 2026-07-13: Fix Parlor silent-failure bug (Gena's session-three report)
+  - Root cause 1: thinking spends the same token budget as the visible
+    reply - after a tool call, a long think could exhaust the 8,192-token
+    cap before producing any text, yielding a silent empty reply. All
+    Anthropic calls now stream (no long-connection timeouts) with bigger
+    budgets: 16,000 for chat, 32,000 for the tool loop
+  - Root cause 2: errors were wiped by the unconditional page refresh -
+    they now persist in session state and stay visible until dismissed
+  - Budget exhaustion and empty replies now produce visible bracketed
+    messages instead of silence
+  - Tool-use captions persist in the chat history instead of vanishing
+  - Messages sanitized before API calls (UI-only keys stripped)
+
 - 2026-07-11: Punch-list fixes from Parlor field report (day one, session two)
   - Parlor conversations now AUTO-ARCHIVE after every reply (the record no
     longer depends on pressing a button); "Remember this" became "Pin to

@@ -103,6 +103,8 @@ def _handle_reply(cfg: dict, system: str, reply: str) -> str:
 def _call_companion(cfg: dict, system: str, messages: list) -> str:
     ai_type = cfg["type"]
     call_fn = get_ai_call_function(ai_type)
+    # Strip UI-only keys (e.g. tool logs) before sending to any API
+    messages = [{"role": m["role"], "content": m["content"]} for m in messages]
     if ai_type == "grok":
         key = cfg.get("xai_api_key")
         return call_fn(messages, system, cfg["model"], custom_api_key=key, use_direct_xai=bool(key))
@@ -271,7 +273,15 @@ def render_parlor():
                 st.markdown(m["content"])
         else:
             with st.chat_message("assistant", avatar=icon):
+                for tool_line in m.get("tools", []):
+                    st.caption(tool_line)
                 st.markdown(m["content"])
+
+    if st.session_state.get("parlor_last_error"):
+        st.error(st.session_state.parlor_last_error)
+        if st.button("Clear error", key="clear_parlor_error"):
+            st.session_state.parlor_last_error = None
+            st.rerun()
 
     user_text = st.chat_input(f"Say something to {name}...", disabled=bool(key_missing))
     if user_text:
@@ -291,6 +301,7 @@ def render_parlor():
             live_system += f"\n\n--- Memories surfacing for this conversation ---\n{hydrated}\n--- End Memories ---"
 
         with st.chat_message("assistant", avatar=icon):
+            tool_events = []
             with st.spinner(f"{name} is thinking... (deep thinkers can take a few minutes)"):
                 try:
                     if tools_enabled and ai_type in ("claude", "pascal"):
@@ -298,7 +309,9 @@ def render_parlor():
                         def show_tool(tool_name, tool_input):
                             summary = tool_input.get("query") or tool_input.get("title") or \
                                       tool_input.get("name") or tool_input.get("conversation_id") or ""
-                            tool_log.caption(f"🛠️ {name} used {tool_name}" + (f": {summary[:80]}" if summary else ""))
+                            line = f"🛠️ {name} used {tool_name}" + (f": {summary[:80]}" if summary else "")
+                            tool_events.append(line)
+                            tool_log.caption(line)
                         client = get_anthropic_client(st.session_state.parlor_cfg.get("anthropic_api_key"))
                         reply = run_with_tools(
                             client, model, live_system,
@@ -315,10 +328,15 @@ def render_parlor():
                             reply = _handle_reply(st.session_state.parlor_cfg, live_system, reply)
                 except Exception as e:
                     reply = None
-                    st.error(f"Couldn't reach {name}: {e}")
+                    # Keep the error in session state so a rerun can't eat the evidence
+                    st.session_state.parlor_last_error = f"Couldn't reach {name}: {e}"
             if reply:
+                st.session_state.parlor_last_error = None
                 st.markdown(reply)
-                st.session_state.parlor_messages.append({"role": "assistant", "content": reply})
+                msg = {"role": "assistant", "content": reply}
+                if tool_events:
+                    msg["tools"] = tool_events
+                st.session_state.parlor_messages.append(msg)
                 # Auto-archive: the record shouldn't depend on remembering to press record.
                 # (Writing the archive, not loading it - the no-river-by-default rule is
                 # about what gets auto-LOADED, and hydration stays relevance-based.)
