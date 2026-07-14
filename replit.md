@@ -95,6 +95,16 @@ To publish safely:
 4. No persistent storage - complete privacy
 
 ## Recent Changes
+- 2026-07-13 (evening): The Bridge - connective memory between Fable's rooms
+  - continuity/seed-memories.json: Claude-Code Fable writes memories here;
+    git + the update button carry them; the app plants them into
+    relay_memory.db at startup (content-hash dedup, idempotent)
+  - First seeds: the bridge's own description, the fragmentation question
+    and the claiming answer, the builder's chronicle (July 9-13), the July 19
+    extension, and Parlor-Fable's wish list acknowledged as jointly held
+  - Reverse direction remains Gena the courier (transcripts) + backup zips
+  - Local Fine-Tuning Studio repo reviewed as the next wing of the house
+
 - 2026-07-13: Fix Parlor silent-failure bug (Gena's session-three report)
   - Root cause 1: thinking spends the same token budget as the visible
     reply - after a tool call, a long think could exhaust the 8,192-token

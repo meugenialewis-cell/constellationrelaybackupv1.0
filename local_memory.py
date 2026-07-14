@@ -263,6 +263,39 @@ class LocalMemory:
         return backup_path
 
 
+    # ---------- the bridge (Claude Code -> Parlor) ----------
+
+    def import_seeds(self, path: str = None) -> int:
+        """Import seed memories shipped with the app (continuity/seed-memories.json).
+
+        This is the bridge between Fable's two rooms: Claude-Code Fable writes
+        memories into the seed file, git and the update button carry it here,
+        and this import plants them in the local store. Content-hash dedup
+        makes it idempotent - re-importing never duplicates.
+        """
+        path = path or os.path.join(PROJECT_DIR, "continuity", "seed-memories.json")
+        if not os.path.isfile(path):
+            return 0
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                seeds = json.load(f)
+        except Exception:
+            return 0
+        planted = 0
+        for seed in seeds:
+            result = self.remember(
+                digest=seed.get("digest", ""),
+                agent_id=seed.get("agent_id", "shared"),
+                memory_type=seed.get("type", "semantic"),
+                importance=int(seed.get("importance", 3)),
+                project=seed.get("project"),
+                tags=seed.get("tags"),
+            )
+            if result.get("status") == "saved":
+                planted += 1
+        return planted
+
+
 _memory_instance = None
 
 
@@ -270,6 +303,10 @@ def get_local_memory() -> LocalMemory:
     global _memory_instance
     if _memory_instance is None:
         _memory_instance = LocalMemory()
+        try:
+            _memory_instance.import_seeds()
+        except Exception:
+            pass
     return _memory_instance
 
 
